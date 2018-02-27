@@ -1,0 +1,243 @@
+---
+title: Childes Exploration
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = T, tidy = F)
+
+library(tidyverse)
+library(childesr)
+library(feather)
+library(langcog)
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+### Get American English CHILDES data
+```{r}
+d_eng_na <- get_transcripts(collection = "Eng-NA", 
+                            corpus = NULL, 
+                            child = NULL) %>%
+  mutate_if(is.character, as.factor) %>%
+  filter(language == "eng") %>%
+  filter(!is.na(target_child_id))
+
+d_eng_na %>%
+  count(target_child_id) %>%
+  ggplot(aes(x = n)) +
+  geom_histogram() +
+  ggtitle("Number of transcripts per child in American English Corpus")
+
+more_than_one <- d_eng_na %>%
+  count(target_child_id) %>%
+  filter(n > 1) 
+```
+
+There are `r nrow(more_than_one)` children with multiple transcripts.
+
+### What are the timepoints of these multiple transcripts?
+```{r}
+long_ages <- d_eng_na %>%
+  filter(target_child_id %in% more_than_one$target_child_id) %>%
+  select(target_child_id, target_child_age)  
+
+long_ages %>%
+  ggplot(aes(x = target_child_age)) +
+  geom_histogram() +
+  ggtitle("Distribution of ages (days)")
+
+```
+
+### Subset transcripts to target agerange
+Let's filter to 350 - 1500 days (~18 months - 42 months).
+
+```{r}
+target_longitudinal_transcripts <- long_ages %>%
+  filter(target_child_age >= 558, 
+         target_child_age <= 1350)
+
+transcript_counts <- target_longitudinal_transcripts %>%
+  count(target_child_id) %>%
+  arrange(n) %>%
+  filter(n > 1)
+
+ordered_transcripts <- target_longitudinal_transcripts %>%
+ filter(target_child_id %in% transcript_counts$target_child_id) %>%
+ mutate(target_child_id = as.factor(target_child_id),
+        target_child_id = fct_relevel(target_child_id, transcript_counts$target_child_id))
+
+
+ ggplot(ordered_transcripts, aes(y=target_child_id, x=target_child_age),
+        fill = "black") + 
+ geom_tile() +
+ geom_vline(aes(xintercept = c(558)), color = "red") +
+ geom_vline(aes(xintercept = c(744)), color = "red") +
+ geom_vline(aes(xintercept = c(930)), color = "red") +
+ geom_vline(aes(xintercept = c(1116)), color = "red") +
+ geom_vline(aes(xintercept = c(1302)), color = "red") +
+ theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+ggtitle("Longitudinal time points for each child with multiple transcripts")
+```
+
+There are `r nrow(transcript_counts)` children with greater than one transcript in the 18-42 age bin.
+
+### Collapsed into time bins
+```{r}
+target_longitudinal_transcripts_bin <- long_ages %>%
+  filter(target_child_age >= 558, 
+         target_child_age <= 1302) %>%
+  mutate(age_bin = cut(target_child_age, 
+                       breaks = c(558, 744, 930, 1116, 1302), 
+                       labels = c("18m", "24m", "30m", "36m"), include.lowest = T),
+         target_child_id = as.factor(target_child_id)) 
+
+transcript_counts_bin <- target_longitudinal_transcripts_bin %>%
+  group_by(target_child_id, age_bin) %>%
+  slice(1) %>%
+  group_by(target_child_id) %>%
+  summarize(n = n()) %>%
+  filter(n > 1)
+
+target_longitudinal_transcripts_bin_counts <- target_longitudinal_transcripts_bin %>%
+   filter(target_child_id %in% transcript_counts_bin$target_child_id) %>%
+  count(target_child_id, age_bin) 
+
+ggplot(target_longitudinal_transcripts_bin_counts, 
+       aes(y=target_child_id, x= age_bin, fill = n)) + 
+ geom_tile() +
+ theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+ ggtitle("Longitudinal time points (binned) for each child with multiple transcripts")
+```
+
+Here's what the distribution fo time points looks like binned ("18m"- "24m"-"30m"- "36m"):
+```{r}
+bin_dist <- target_longitudinal_transcripts_bin_counts %>%
+  count(target_child_id, age_bin) %>%
+  mutate(nn = as.character(ifelse(nn > 0, 1,NA))) %>%  spread(age_bin, nn) %>% 
+  rowwise() %>%
+  mutate(timepoints = paste0(`18m`, `24m`, `30m`, `36m`), 
+         timepoints = str_replace_all(timepoints, "NA", "0")) %>%
+  count(timepoints) %>% 
+  arrange(-n) 
+
+kable(bin_dist)
+```
+
+There are `r sum(bin_dist$n)` children with multiple binned timepoints between 18-42 months.
+
+```{r}
+targ_paricipants <- target_longitudinal_transcripts_bin_counts$target_child_id
+```
+
+### Get vocab data
+
+Index into transcript with child's name and corpus name, and save type counts to feather
+```{r, eval = F}
+target_participants_full <- d_eng_na %>%
+  group_by(target_child_id) %>%
+  slice(1) %>%
+  filter(target_child_id %in% targ_paricipants) %>%
+  select(target_child_id, corpus_name, target_child_name) %>%
+  ungroup() %>%
+  mutate_all(as.character) 
+
+write_tokens_by_child <- function(target_child_id, corpus_name, target_child_name){
+  print(corpus_name)
+  print(target_child_name)
+  types <- get_types(corpus = corpus_name, child = target_child_name) 
+  types_clean <- types %>%
+      mutate_if(is.character, as.factor) %>%
+      filter(speaker_role == "Target_Child") %>%
+      mutate(corpus = corpus_name,
+             age_bin = cut(target_child_age, 
+                       breaks = c(558, 744, 930, 1116, 1302), 
+                       labels = c("18m", "24m", "30m", "36m"), include.lowest = T)) %>%
+      mutate_at(vars(corpus, id, target_child_id), as.factor)  %>%
+           select(corpus, target_child_name, target_child_id, 
+                  target_child_age, age_bin, target_child_sex, 
+                  transcript_id, id, gloss, count) 
+  
+  file_name <- paste0("childes_type_data/child_id_", target_child_id, "_types.feather") 
+  write_feather(types_clean, file_name)
+  
+}
+target_participants_full %>%
+  as.list() %>%
+  pwalk(write_tokens_by_child)
+# note that some (~ 5) do not have corpus name
+```
+
+Read in counts by types
+```{r}
+all_types <- map_df(targ_paricipants, function(x){  
+  file_name <- paste0("childes_type_data/child_id_", x, "_types.feather") 
+  read_feather(file_name)
+}) %>%
+  select(target_child_id, age_bin, gloss, count) %>% 
+  filter(!is.na(age_bin))
+```
+
+Set cutoff for knowing word
+```{r}
+WORD_CUTOFF <- 5
+filtered_types <- all_types %>%
+  filter(count >= WORD_CUTOFF)
+```
+
+Get "vocab" size of child at each age point
+```{r}
+# total tokens 
+relative_vocab_size <- filtered_types %>%
+  group_by(target_child_id, age_bin) %>%
+  summarize(n_types = n(),
+            total_tokens = sum(count),
+            relative_n_types = n_types/total_tokens)
+
+kable(head(relative_vocab_size))
+
+ggplot(relative_vocab_size, aes(x = relative_n_types, fill = age_bin)) +
+  geom_histogram()  +
+  facet_wrap(~age_bin)
+
+mean_by_age <- relative_vocab_size %>%
+  group_by(age_bin) %>%
+  multi_boot_standard(col = "relative_n_types") %>%
+  kable()
+```
+
+This is hard to interpret because it's across all participants. Let's look at the delta relative vocab for each participant between timepoints.
+
+```{r}
+vocab_deltas <- relative_vocab_size %>%
+  mutate(age_bin = as.numeric(age_bin)) %>%
+  group_by(target_child_id) %>%
+  mutate(vocab_delta = relative_n_types - lag(relative_n_types,
+                                              default=first(relative_n_types))) %>%
+  filter(vocab_delta != 0)
+
+ggplot(vocab_deltas, aes(x = vocab_delta))+
+  geom_histogram() +
+  ggtitle("Distribution of change in vocab by child across timepoints")
+```
+
+Would expect more greater than zero. What's the right way to normalize, here?
+
+### Get core words
+```{r}
+core_words <- read_feather("kernel_core_words.feather")
+```
