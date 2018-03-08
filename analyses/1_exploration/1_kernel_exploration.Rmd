@@ -26,6 +26,7 @@ theme_set(theme_classic(base_size = 10))
 ```
 
 
+
 ```{r}
 full_dict <- read_delim("allGKH.csv", delim = ";") %>%
   mutate_all(as.factor) %>%
@@ -35,13 +36,15 @@ full_dict <- read_delim("allGKH.csv", delim = ";") %>%
          dict = Dictionary)
 ```
 
-Why are stucture categories not mutually exclusive?e.g. 
+Why are stucture categories not mutually exclusive? e.g. 
 ```{r}
 full_dict %>%
   filter(dict == "Longman") %>%
   head()
 ```
+because different senses.
 
+Take min dist sense for each word. 
 
 Let's look only at the two dictionaries that are intended for speakers with limited English knowledge.
 ```{r}

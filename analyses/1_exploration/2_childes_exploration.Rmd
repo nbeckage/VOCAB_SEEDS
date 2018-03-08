@@ -21,6 +21,7 @@ library(tidyverse)
 library(childesr)
 library(feather)
 library(langcog)
+library(modelr)
 
 theme_set(theme_classic(base_size = 10))
 
@@ -58,7 +59,6 @@ long_ages %>%
   ggplot(aes(x = target_child_age)) +
   geom_histogram() +
   ggtitle("Distribution of ages (days)")
-
 ```
 
 ### Subset transcripts to target agerange
@@ -88,8 +88,10 @@ ordered_transcripts <- target_longitudinal_transcripts %>%
  geom_vline(aes(xintercept = c(930)), color = "red") +
  geom_vline(aes(xintercept = c(1116)), color = "red") +
  geom_vline(aes(xintercept = c(1302)), color = "red") +
- theme(axis.text.y=element_blank(),
-        axis.ticks.y=element_blank()) +
+  ylab("Child ID") +
+   xlab("Child age (days)") +
+ theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
 ggtitle("Longitudinal time points for each child with multiple transcripts")
 ```
 
@@ -118,10 +120,21 @@ target_longitudinal_transcripts_bin_counts <- target_longitudinal_transcripts_bi
 
 ggplot(target_longitudinal_transcripts_bin_counts, 
        aes(y=target_child_id, x= age_bin, fill = n)) + 
+  scale_fill_gradient(low = "grey", high = "red") +
  geom_tile() +
  theme(axis.text.y = element_blank(),
         axis.ticks.y = element_blank()) +
  ggtitle("Longitudinal time points (binned) for each child with multiple transcripts")
+
+min <- target_longitudinal_transcripts_bin_counts %>% filter(!(target_child_id %in% c("5204", "5255")))
+ggplot(target_longitudinal_transcripts_bin_counts %>% filter(!(target_child_id %in% c("5204", "5255", "5193"))), 
+       aes(y=target_child_id, x= age_bin, fill = n)) + 
+  scale_fill_gradient(low = "grey", high = "red") +
+ geom_tile() +
+ theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank()) +
+ ggtitle("Longitudinal time points (binned) for each child with multiple transcripts")
+
 ```
 
 Here's what the distribution fo time points looks like binned ("18m"- "24m"-"30m"- "36m"):
@@ -141,7 +154,7 @@ kable(bin_dist)
 There are `r sum(bin_dist$n)` children with multiple binned timepoints between 18-42 months.
 
 ```{r}
-targ_paricipants <- target_longitudinal_transcripts_bin_counts$target_child_id
+targ_paricipants <- unique(target_longitudinal_transcripts_bin_counts$target_child_id)
 ```
 
 ### Get vocab data
@@ -166,15 +179,23 @@ write_tokens_by_child <- function(target_child_id, corpus_name, target_child_nam
       mutate(corpus = corpus_name,
              age_bin = cut(target_child_age, 
                        breaks = c(558, 744, 930, 1116, 1302), 
-                       labels = c("18m", "24m", "30m", "36m"), include.lowest = T)) %>%
-      mutate_at(vars(corpus, id, target_child_id), as.factor)  %>%
-           select(corpus, target_child_name, target_child_id, 
-                  target_child_age, age_bin, target_child_sex, 
-                  transcript_id, id, gloss, count) 
+                       labels = c("18m", "24m", "30m", "36m"),
+                       include.lowest = T)) %>%
+      group_by(age_bin, gloss) %>%
+      summarize(count = sum(count))
   
-  file_name <- paste0("childes_type_data/child_id_", target_child_id, "_types.feather") 
-  write_feather(types_clean, file_name)
+  types_clean_with_demo <- types_clean %>%
+        ungroup() %>%
+        mutate(corpus_id = types$corpus_id[1],
+               target_child_id = types$target_child_id[1], 
+               target_child_name = types$target_child_name[1],
+               target_child_sex = types$target_child_sex[1]) %>%
+        select(corpus_id, target_child_name, target_child_id, 
+                  age_bin, target_child_sex, gloss, count) 
   
+  file_name <- paste0("childes_type_data/child_id_", 
+                      target_child_id, "_types.feather") 
+  write_feather(types_clean_with_demo, file_name)
 }
 target_participants_full %>%
   as.list() %>%
@@ -196,7 +217,8 @@ Set cutoff for knowing word
 ```{r}
 WORD_CUTOFF <- 5
 filtered_types <- all_types %>%
-  filter(count >= WORD_CUTOFF)
+  filter(count >= WORD_CUTOFF) %>%
+  mutate(numeric_age_bin = as.numeric(age_bin))
 ```
 
 Get "vocab" size of child at each age point
@@ -205,39 +227,246 @@ Get "vocab" size of child at each age point
 relative_vocab_size <- filtered_types %>%
   group_by(target_child_id, age_bin) %>%
   summarize(n_types = n(),
-            total_tokens = sum(count),
-            relative_n_types = n_types/total_tokens)
-
-kable(head(relative_vocab_size))
-
-ggplot(relative_vocab_size, aes(x = relative_n_types, fill = age_bin)) +
-  geom_histogram()  +
-  facet_wrap(~age_bin)
-
-mean_by_age <- relative_vocab_size %>%
-  group_by(age_bin) %>%
-  multi_boot_standard(col = "relative_n_types") %>%
-  kable()
+            total_tokens = sum(count))
 ```
 
-This is hard to interpret because it's across all participants. Let's look at the delta relative vocab for each participant between timepoints.
-
+Types vs. Tokens
 ```{r}
-vocab_deltas <- relative_vocab_size %>%
+relative_vocab_size %>%
+  ungroup()%>%
+  ggplot(aes(y = n_types, x = total_tokens)) +
+  geom_smooth() +
+  ylab("N words (types)") +
+  xlab("Number of child-produced words in transcript (tokens)") +
+  facet_wrap(~age_bin)
+```
+
+Tokens vs. age bin
+```{r}
+relative_vocab_size %>%
+  group_by(age_bin) %>%
+  multi_boot_standard(col = "total_tokens") %>%
+  ggplot(aes(x = age_bin, y = mean, ymin = ci_lower, ymax = ci_upper)) +
+  ylab("Number of child-produced words in transcript (tokens)") +
+  geom_pointrange() 
+```
+
+
+
+Get token-residualized vocab estimates
+```{r}
+relative_vocab_size_with_resids <- relative_vocab_size %>%
+  add_residuals(lm(n_types~total_tokens, d = relative_vocab_size))
+
+relative_vocab_size_with_resids %>%
+  ggplot(aes(x = resid, fill = age_bin)) + 
+  geom_histogram() +
+  facet_grid(~age_bin) +
+  theme(legend.position = "none")
+
+relative_vocab_size_with_resids %>%
+  group_by(age_bin) %>%
+  multi_boot_standard(col = "resid", na.rm = T) %>%
+  ggplot(aes(x = age_bin, y = mean)) +
+  ggtitle("Population-level vocabulary size") +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = age_bin)) +
+  ylab("number of words (token-residualized)") +
+  theme(legend.position = "none", text = element_text(size = 18))
+```
+
+Let's look within-child
+```{r}
+vocab_deltas <- relative_vocab_size_with_resids %>%
   mutate(age_bin = as.numeric(age_bin)) %>%
   group_by(target_child_id) %>%
-  mutate(vocab_delta = relative_n_types - lag(relative_n_types,
-                                              default=first(relative_n_types))) %>%
-  filter(vocab_delta != 0)
+  mutate(min_bin = min(age_bin),
+         min_bin = ifelse(min_bin == age_bin, "min", "not_min")) %>%
+  mutate(vocab_delta = resid - lag(resid,
+                                   default=first(resid)),
+         log_vocab_delta = log(vocab_delta))
 
-ggplot(vocab_deltas, aes(x = vocab_delta))+
+ggplot(filter(vocab_deltas, min_bin == "not_min") %>% ungroup(),
+       aes(x = vocab_delta)) +
+  geom_histogram(binwidth = 3, fill = "grey") +
+  #geom_density() +
+  ggtitle("Distribution of change in vocab by child across timepoints") +
+  geom_vline(aes(xintercept = 0), color = "red", size = 1) +
+  xlab("number of words (token-residualized)")  +
+    theme(legend.position = "none", text = element_text(size = 18))
+
+
+ggplot(filter(vocab_deltas, min_bin == "not_min"), 
+       aes(x = log_vocab_delta)) +
   geom_histogram() +
-  ggtitle("Distribution of change in vocab by child across timepoints")
+  ggtitle("Distribution of change in vocab by child across timepoints") +
+  geom_vline(aes(xintercept = 1), color = "red") +
+  xlab("log number of words (token-residualized)") 
+# note negative deltas are removed when logged
+
+vocab_deltas %>%
+  filter(min_bin == "not_min") %>%
+  mutate(age_bin = as.factor(age_bin)) %>%
+  group_by(age_bin) %>%
+  multi_boot_standard(col = "vocab_delta", na.rm = T) %>%
+  ggplot(aes(x = age_bin, y = mean)) +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = age_bin)) +
+  ylab("change in number of words (token-residualized)") +
+  geom_hline(aes(yintercept = 0), color = "red") +
+  theme(legend.position = "none", text = element_text(size = 18))
+
+
+vocab_deltas %>%
+  filter(min_bin == "not_min") %>%
+  mutate(age_bin = as.factor(age_bin)) %>%
+  group_by(age_bin) %>%
+  multi_boot_standard(col = "log_vocab_delta", na.rm = T) %>%
+  ggplot(aes(x = age_bin, y = mean)) +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = age_bin)) +
+  ylab("change in number of words (token-residualized)") +
+  geom_hline(aes(yintercept = 1), color = "red") +
+  theme(legend.position = "none", text = element_text(size = 18))
 ```
 
-Would expect more greater than zero. What's the right way to normalize, here?
+mostly greater than zero
 
 ### Get core words
 ```{r}
-core_words <- read_feather("kernel_core_words.feather")
+core_words <- read_feather("kernel_core_words.feather")  %>%
+  unlist(use.names = F)
+```
+
+
+At each time point,  how many core words does the child know?
+
+```{r}
+get_num_core_words <- function(this_target_child_id, this_age_bin, df, core_words) {
+  
+  cumulative_df <- df %>%
+    filter(numeric_age_bin <= this_age_bin, 
+           target_child_id == this_target_child_id) 
+  
+  non_cumulative_df <- df %>%
+    filter(numeric_age_bin == this_age_bin, 
+           target_child_id == this_target_child_id)
+  
+  n_core_types_cumulative <- cumulative_df %>%
+    filter(gloss %in% core_words) %>%
+    summarize(n_core_types_cumulative = n()) %>%
+    select(n_core_types_cumulative) %>%
+    pull()
+  
+  n_core_types_non_cumulative <- non_cumulative_df  %>%
+    filter(gloss %in% core_words) %>%
+    summarize(n_core_types = n())  %>%
+    select(n_core_types) %>%
+    pull()
+  
+  data.frame(target_child_id = this_target_child_id,
+              numeric_age_bin = this_age_bin, 
+              n_types = nrow(non_cumulative_df),
+              n_types_cumulative = nrow(cumulative_df),
+              n_tokens = sum(non_cumulative_df$count),
+              n_tokens_cumulative = sum(cumulative_df$count),
+              n_core_types = ifelse(length(n_core_types_non_cumulative) > 0 , n_core_types_non_cumulative, NA),
+              n_core_types_cumulative = ifelse(length(n_core_types_cumulative) > 0 ,n_core_types_cumulative, NA))
+  
+}
+
+child_age_bin_pairs <- distinct(filtered_types, target_child_id, numeric_age_bin)
+
+all_counts <- map2_df(child_age_bin_pairs$target_child_id, 
+          child_age_bin_pairs$numeric_age_bin,
+          get_num_core_words, filtered_types, core_words)
+
+ggplot(all_counts, aes(x = n_core_types_cumulative, 
+                       fill = as.factor(numeric_age_bin))) +
+  geom_histogram() +
+  facet_grid(~numeric_age_bin) +
+  theme(legend.position = "none")
+
+
+all_counts %>%
+  group_by(numeric_age_bin) %>%
+  multi_boot_standard(col = "n_core_types", na.rm = T) %>%
+  ggplot(aes(x = numeric_age_bin, y = mean)) +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = as.factor(numeric_age_bin))) +
+  ylab("N core types non-cumulative") +
+  theme(legend.position = "none")
+
+all_counts %>%
+  group_by(numeric_age_bin) %>%
+  multi_boot_standard(col = "n_core_types_cumulative", na.rm = T) %>%
+  mutate(fct_age_bin = as.factor(numeric_age_bin),
+        age_bin = fct_recode(fct_age_bin, 
+                             "18m" = "1", "24m" = "2", "32m" = "3", "48m" = "4")) %>%
+  ggplot(aes(x = age_bin, y = mean)) +
+  ggtitle("Cumulative # Kernal words") +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = as.factor(numeric_age_bin))) +
+  ylab("N core types cumulative") +
+    theme(legend.position = "none", text = element_text(size = 18))
+
+```
+
+Does Kernal vocab size at t1 predict vocab size at t2?
+```{r}
+all_counts_with_resids <-  all_counts %>%
+  add_residuals(lm(n_types~n_tokens, d = all_counts),
+                var = "non_cumulative_vocab_resid") %>%
+  add_residuals(lm(n_types_cumulative ~ n_tokens_cumulative, d = all_counts), 
+                var = "cumulative_vocab_resid") %>%
+  add_residuals(lm(n_core_types~n_tokens, d = all_counts), 
+                var = "non_cumulative_core_resid") %>%
+  add_residuals(lm(n_core_types_cumulative ~ n_tokens_cumulative, d = all_counts), 
+                var = "cumulative_core_resid") %>%
+  group_by(target_child_id) %>%
+  arrange(target_child_id, numeric_age_bin) %>% 
+  mutate(prop_core_cumulative = cumulative_core_resid/cumulative_vocab_resid,
+         prop_core_non_cumulative = non_cumulative_core_resid/non_cumulative_vocab_resid,
+         previous_prop_core_cumulative = lag(prop_core_cumulative), 
+         previous_prop_core_non_cumulative = lag(prop_core_non_cumulative),
+         next_non_cumulative_vocab_resid = lead(non_cumulative_vocab_resid),
+         previous_cumulative_core_resid = lag(cumulative_core_resid))
+
+m <- lm(cumulative_vocab_resid ~ previous_cumulative_core_resid  + n_types,
+        all_counts_with_resids)
+summary(m)
+all_counts_with_resids %>%
+  ungroup() %>%
+  ggplot(aes(y = log(cumulative_vocab_resid), 
+             x = log(previous_prop_core_cumulative))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+all_counts_with_resids %>%
+  ungroup() %>%
+  ggplot(aes(y = log(non_cumulative_vocab_resid),
+             x = log(previous_prop_core_non_cumulative))) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+cor.test(log(all_counts_with_resids$cumulative_vocab_resid), log(all_counts_with_resids$previous_prop_core_cumulative))
+```
+
+```{r, include = F}
+one_hot_encoding <- filtered_types %>%
+  mutate(n = 1) %>%
+  select(target_child_id, numeric_age_bin, gloss, n) %>%
+  spread(gloss, n) %>%
+  left_join(select(all_counts_with_resids, target_child_id, numeric_age_bin, next_non_cumulative_vocab_resid)) %>%
+  select(target_child_id,numeric_age_bin,  next_non_cumulative_vocab_resid, everything()) %>%
+  filter(!is.na(next_non_cumulative_vocab_resid))
+
+one_hot_encoding[is.na(one_hot_encoding)] = 0
+names(one_hot_encoding) <- tolower(as.vector(gsub("[']", "", names(one_hot_encoding))))
+names(one_hot_encoding) <- gsub("[+]", "", names(one_hot_encoding))
+names(one_hot_encoding) <- gsub("i_", "", names(one_hot_encoding))
+
+
+vec <- names(one_hot_encoding)[c(-1:-3, -1290, -1458, -1942, -1946, -4259, -1903, -1927, -1926, -1888)]
+                                 
+b <- paste(vec, collapse ="+")
+mod <- paste("next_non_cumulative_vocab_resid ~ ",b,sep = "")
+
+m <- lm(as.formula(mod), one_hot_encoding)
+  
 ```
