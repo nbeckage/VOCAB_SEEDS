@@ -15,13 +15,15 @@ output:
 library(knitr)
 
 opts_chunk$set(echo = T, message = F, warning = F, 
-               error = F, cache = T, tidy = F)
+               error = F, cache = F, tidy = F)
 
 library(tidyverse)
 library(childesr)
 library(feather)
 library(langcog)
 library(modelr)
+library(broom)
+library(lme4)
 
 theme_set(theme_classic(base_size = 10))
 
@@ -252,7 +254,6 @@ relative_vocab_size %>%
 ```
 
 
-
 Get token-residualized vocab estimates
 ```{r}
 relative_vocab_size_with_resids <- relative_vocab_size %>%
@@ -344,31 +345,26 @@ get_num_core_words <- function(this_target_child_id, this_age_bin, df, core_word
   cumulative_df <- df %>%
     filter(numeric_age_bin <= this_age_bin, 
            target_child_id == this_target_child_id) 
-  
-  non_cumulative_df <- df %>%
-    filter(numeric_age_bin == this_age_bin, 
-           target_child_id == this_target_child_id)
-  
+
   n_core_types_cumulative <- cumulative_df %>%
     filter(gloss %in% core_words) %>%
     summarize(n_core_types_cumulative = n()) %>%
     select(n_core_types_cumulative) %>%
     pull()
   
-  n_core_types_non_cumulative <- non_cumulative_df  %>%
-    filter(gloss %in% core_words) %>%
-    summarize(n_core_types = n())  %>%
-    select(n_core_types) %>%
+  n_Ncore_types_cumulative <- cumulative_df %>%
+    filter(!(gloss %in% core_words)) %>%
+    summarize(n_Ncore_types_cumulative = n()) %>%
+    select(n_Ncore_types_cumulative) %>%
     pull()
+
   
   data.frame(target_child_id = this_target_child_id,
               numeric_age_bin = this_age_bin, 
-              n_types = nrow(non_cumulative_df),
               n_types_cumulative = nrow(cumulative_df),
-              n_tokens = sum(non_cumulative_df$count),
               n_tokens_cumulative = sum(cumulative_df$count),
-              n_core_types = ifelse(length(n_core_types_non_cumulative) > 0 , n_core_types_non_cumulative, NA),
-              n_core_types_cumulative = ifelse(length(n_core_types_cumulative) > 0 ,n_core_types_cumulative, NA))
+              n_core_types_cumulative = ifelse(length(n_core_types_cumulative) > 0 ,n_core_types_cumulative, NA),
+              n_Ncore_types_cumulative = ifelse(length(n_Ncore_types_cumulative) > 0 ,n_Ncore_types_cumulative, NA))
   
 }
 
@@ -378,58 +374,80 @@ all_counts <- map2_df(child_age_bin_pairs$target_child_id,
           child_age_bin_pairs$numeric_age_bin,
           get_num_core_words, filtered_types, core_words)
 
-ggplot(all_counts, aes(x = n_core_types_cumulative, 
-                       fill = as.factor(numeric_age_bin))) +
-  geom_histogram() +
-  facet_grid(~numeric_age_bin) +
-  theme(legend.position = "none")
-
-
 all_counts %>%
-  group_by(numeric_age_bin) %>%
-  multi_boot_standard(col = "n_core_types", na.rm = T) %>%
-  ggplot(aes(x = numeric_age_bin, y = mean)) +
-  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = as.factor(numeric_age_bin))) +
-  ylab("N core types non-cumulative") +
-  theme(legend.position = "none")
-
-all_counts %>%
-  group_by(numeric_age_bin) %>%
-  multi_boot_standard(col = "n_core_types_cumulative", na.rm = T) %>%
+  gather(word_type, value, c(-1:-2, -4)) %>%
+  group_by(numeric_age_bin, word_type) %>%
+  multi_boot_standard(col = "value", na.rm = T)  %>%
+  ungroup() %>%
   mutate(fct_age_bin = as.factor(numeric_age_bin),
-        age_bin = fct_recode(fct_age_bin, 
-                             "18m" = "1", "24m" = "2", "32m" = "3", "48m" = "4")) %>%
-  ggplot(aes(x = age_bin, y = mean)) +
-  ggtitle("Cumulative # Kernal words") +
-  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper, color = as.factor(numeric_age_bin))) +
-  ylab("N core types cumulative") +
-    theme(legend.position = "none", text = element_text(size = 18))
+         age_bin = fct_recode(fct_age_bin, "18m" = "1", "24m" = "2", "32m" = "3", "48m" = "4"),
+         word_type = as.factor(word_type),
+         word_type = fct_recode(word_type, 
+                                                           "core" = "n_core_types_cumulative", "non-core" = "n_Ncore_types_cumulative", "total" = "n_types_cumulative")) %>%
+  ggplot(aes(x = age_bin, y = mean, color = word_type, group = word_type)) +
+  ggtitle("Cumulative words") +
+  geom_pointrange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  ylab("N types (cumulative)") +
+    theme(text = element_text(size = 18)) +
+    geom_line() 
 
 ```
 
-Does Kernal vocab size at t1 predict vocab size at t2?
 ```{r}
 all_counts_with_resids <-  all_counts %>%
-  add_residuals(lm(n_types~n_tokens, d = all_counts),
-                var = "non_cumulative_vocab_resid") %>%
   add_residuals(lm(n_types_cumulative ~ n_tokens_cumulative, d = all_counts), 
                 var = "cumulative_vocab_resid") %>%
-  add_residuals(lm(n_core_types~n_tokens, d = all_counts), 
-                var = "non_cumulative_core_resid") %>%
   add_residuals(lm(n_core_types_cumulative ~ n_tokens_cumulative, d = all_counts), 
                 var = "cumulative_core_resid") %>%
+  add_residuals(lm(n_Ncore_types_cumulative ~ n_tokens_cumulative, d = all_counts), 
+                var = "cumulative_Ncore_resid")  %>%
   group_by(target_child_id) %>%
   arrange(target_child_id, numeric_age_bin) %>% 
-  mutate(prop_core_cumulative = cumulative_core_resid/cumulative_vocab_resid,
-         prop_core_non_cumulative = non_cumulative_core_resid/non_cumulative_vocab_resid,
-         previous_prop_core_cumulative = lag(prop_core_cumulative), 
-         previous_prop_core_non_cumulative = lag(prop_core_non_cumulative),
-         next_non_cumulative_vocab_resid = lead(non_cumulative_vocab_resid),
-         previous_cumulative_core_resid = lag(cumulative_core_resid))
+  mutate(previous_cumulative_core_resid = lag(cumulative_core_resid),
+         previous_cumulative_vocab_resid = lag(cumulative_vocab_resid))
+```
 
-m <- lm(cumulative_vocab_resid ~ previous_cumulative_core_resid  + n_types,
-        all_counts_with_resids)
-summary(m)
+### Predicting vocab size
+Does Kernal vocab size at t1 predict vocab size at t2?
+
+
+####  total (t2) ~ core (t1)
+```{r}
+m <- lm(cumulative_vocab_resid ~ previous_cumulative_core_resid + 
+            previous_cumulative_vocab_resid, all_counts_with_resids)
+
+summary(m) %>%
+  tidy() %>%
+  kable()
+```
+
+####  non-core (t2) ~ core (t1)
+```{r}
+m <- lm(cumulative_Ncore_resid ~ previous_cumulative_core_resid + 
+            previous_cumulative_vocab_resid, all_counts_with_resids)
+
+summary(m) %>%
+  tidy() %>%
+  kable()
+```
+
+####  core (t2) ~ core (t1)
+```{r}
+m <- lm(cumulative_core_resid ~ previous_cumulative_core_resid + 
+            previous_cumulative_vocab_resid, all_counts_with_resids)
+
+summary(m) %>%
+  tidy() %>%
+  kable()
+```
+
+```{r, eval = F}
+m <- lmer(cumulative_vocab_resid ~ previous_cumulative_core_resid + 
+            previous_cumulative_vocab_resid+
+        (1|target_child_id) , all_counts_with_resids)
+
+summary(m) 
+
 all_counts_with_resids %>%
   ungroup() %>%
   ggplot(aes(y = log(cumulative_vocab_resid), 
@@ -447,7 +465,7 @@ all_counts_with_resids %>%
 cor.test(log(all_counts_with_resids$cumulative_vocab_resid), log(all_counts_with_resids$previous_prop_core_cumulative))
 ```
 
-```{r, include = F}
+```{r, include = F, eval = F}
 one_hot_encoding <- filtered_types %>%
   mutate(n = 1) %>%
   select(target_child_id, numeric_age_bin, gloss, n) %>%
