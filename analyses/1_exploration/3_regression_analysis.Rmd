@@ -1,0 +1,203 @@
+---
+title: Regression analysis for each word
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(childesr)
+library(feather)
+library(langcog)
+library(modelr)
+library(broom)
+library(lme4)
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+MODEL: `Resid_num_words ~ know_word + age + age_diff + previous_resid_num_words + (1|kid)`
+
+## Get American English CHILDES transcripts
+```{r}
+d_eng_na <- get_transcripts(collection = "Eng-NA", 
+                            corpus = NULL, 
+                            child = NULL) %>%
+  mutate_if(is.character, as.factor) %>%
+  filter(language == "eng") %>%
+  filter(!is.na(target_child_id))
+
+sub_sample <- d_eng_na %>% # more than one and in age bracket
+  filter(target_child_age >= 558, 
+         target_child_age <= 1350)  %>%
+  count(target_child_id) %>%
+  filter(n > 1) 
+
+targ_paricipants <- d_eng_na %>%
+  filter(target_child_id %in% sub_sample$target_child_id)  %>%
+  select(target_child_id, corpus_name, target_child_name)  %>%
+  mutate_all(as.character)
+```
+
+## Get tokens by kid
+```{r, eval = F}
+write_tokens_by_child <- function(target_child_id, corpus_name, target_child_name){
+  print(corpus_name)
+  print(target_child_name)
+  types <- get_types(corpus = corpus_name, child = target_child_name) 
+  types_clean <- types %>%
+      mutate_if(is.character, as.factor) %>%
+      filter(speaker_role == "Target_Child") %>%
+      mutate(corpus = corpus_name,
+             age_bin = cut(target_child_age, 
+                       breaks = seq(350, 1497, by = 31),
+                       include.lowest = T)) %>%
+      group_by(age_bin, gloss) %>%
+      summarize(count = sum(count))
+  
+  types_clean_with_demo <- types_clean %>%
+        ungroup() %>%
+        mutate(corpus_id = types$corpus_id[1],
+               target_child_id = types$target_child_id[1], 
+               target_child_name = types$target_child_name[1],
+               target_child_sex = types$target_child_sex[1]) %>%
+        select(corpus_id, target_child_name, target_child_id, 
+                  age_bin, target_child_sex, gloss, count) 
+  
+  file_name <- paste0("childes_type_data/childes_type_data_full/child_id_full_", 
+                      target_child_id, "_types.feather") 
+  write_feather(types_clean_with_demo, file_name)
+}
+targ_paricipants %>%
+  distinct() %>%
+  as.list() %>%
+  pwalk(write_tokens_by_child)
+```
+
+
+## Get vars for regression
+"Vocab" size of child at each age point and other control variables.
+```{r}
+WORD_CUTOFF <- 5
+
+files <- list.files("childes_type_data/childes_type_data_full")
+d <- map_df(files, function(x){read_feather(paste0("childes_type_data/childes_type_data_full/", x))})
+
+# get word count for each kid x age bin
+d_filter <- d %>%
+  filter(count >= WORD_CUTOFF) %>%
+  mutate(numeric_age_bin = as.numeric(age_bin)) %>%
+  select(target_child_id, numeric_age_bin, gloss, count) %>%
+  mutate(gloss = tolower(gloss)) %>%
+  group_by(target_child_id, numeric_age_bin, gloss) %>%
+  mutate(count = sum(count)) # sum across age bin for each kid
+```
+
+Number of kids that said a word.
+```{r}
+MIN_NUM_KIDS_PER_WORD <- 10
+
+common_words <- d_filter %>%
+  ungroup() %>%
+  distinct(gloss, target_child_id) %>%
+  count(gloss) %>%
+  filter(n > MIN_NUM_KIDS_PER_WORD)
+
+d_filter_common <- d_filter %>%
+  filter(gloss %in% common_words$gloss)
+```
+
+```{r}
+# total tokens 
+relative_vocab_size <- d_filter %>%
+  group_by(target_child_id, numeric_age_bin) %>%
+  summarize(n_types = n(),
+            total_tokens = sum(count))
+
+relative_vocab_size_with_resids <- relative_vocab_size %>%
+  add_residuals(lm(n_types~total_tokens, d = relative_vocab_size)) %>%
+   rename(current_vocab_resid = resid) %>%
+   mutate(previous_vocab_resid = lag(current_vocab_resid),
+          previous_numeric_age_bin = lag(numeric_age_bin),
+          age_lag = numeric_age_bin - previous_numeric_age_bin) %>%
+  select(-n_types, -total_tokens)
+```
+
+## Get by-word coefficients
+```{r, eval = F}
+target_words <- d_filter_common %>%
+  ungroup %>%
+  distinct(gloss) %>%
+  unlist(use.names = F)
+
+get_word_beta <- function(word, df, vocab_df){
+  
+  previous_knowers <- df %>%
+    filter(gloss == word)  %>%
+    select(target_child_id, numeric_age_bin) %>%
+    mutate(know_word = 1)
+  
+  complete_df <- relative_vocab_size_with_resids %>%
+    left_join(previous_knowers, 
+              by = c("previous_numeric_age_bin" = "numeric_age_bin",
+                     "target_child_id")) %>%
+    mutate(know_word = ifelse(is.na(know_word), 0, 1))
+  
+  model <- lmer(current_vocab_resid ~ know_word + previous_vocab_resid +
+              numeric_age_bin + age_lag + (1|target_child_id), 
+            data =  complete_df)
+  
+   summary(model)$coefficients %>% 
+     data.frame() %>%
+     rownames_to_column("term") %>%
+     filter(term == "know_word") %>%
+     mutate(word = word) %>%
+     rename(SE = Std..Error,
+            t = t.value) %>%
+     select(word, Estimate, SE, t)
+  
+}
+
+word_coeffs <- map_df(target_words, 
+       get_word_beta, 
+       d_filter,
+       relative_vocab_size_with_resids)
+
+#write_csv(word_coeffs, "word_coeffs.csv")
+```
+
+```{r}
+word_coeffs <- read_csv( "word_coeffs.csv")
+
+ggplot(word_coeffs, aes(t)) +
+  geom_histogram() +
+  ggtitle("t-distribution ") +
+  geom_vline(aes(xintercept = 2), color = "red") +
+  geom_vline(aes(xintercept = -2), color = "red") +
+  theme_classic()
+
+ggplot(word_coeffs, aes(Estimate)) +
+  geom_histogram() +
+  ggtitle("beta-distribution ") +
+  theme_classic()
+```
+
+```{r}
+m = word_coeffs %>%
+  left_join(common_words, by = c("word" = "gloss")) %>%
+  DT::datatable()
+```
+

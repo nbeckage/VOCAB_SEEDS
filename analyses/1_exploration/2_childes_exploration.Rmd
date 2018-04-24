@@ -221,6 +221,7 @@ WORD_CUTOFF <- 5
 filtered_types <- all_types %>%
   filter(count >= WORD_CUTOFF) %>%
   mutate(numeric_age_bin = as.numeric(age_bin))
+
 ```
 
 Get "vocab" size of child at each age point
@@ -440,6 +441,15 @@ summary(m) %>%
   tidy() %>%
   kable()
 ```
+
+NOTES: 
+-> core- periphery structure in networks - for each child
+-> are AoA adult judgemnts about corenesS?  
+- childes network vocabuly (get closesness/betweenweess for each word) -> compute with word in vs. out
+- intesection of vocabulary
+- what words, when removed, deviated most from normative in terms of their learning trajectory
+
+* Mahesh (PNAS)
 
 ```{r, eval = F}
 m <- lmer(cumulative_vocab_resid ~ previous_cumulative_core_resid + 
