@@ -1,0 +1,571 @@
+---
+title: MTLD words mapped by semantics
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+library(broom)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+Do low and high kids show different patterns in the semantics of their vocabularies at t1?
+
+Here I took the embeddings from wikipedia for all words produced by the target kids and looked for differences in their semantics. "Low" corresponds to the group of kids who went on to learn relatively fewer words, and "high" corresponds to the group of kids whoe went on to learn relatively more words. These groups were determined using the MTLD measure (see other markdown). There are 51 kids in each group. 
+
+My take away is that high kids know more semantically bleached verbs (e.g., "put", "make"), more conversational words/connectives (e.g. "yes", "and", "where"), and more prepositions and pronouns.  (Also more number words.)
+
+## Analysis 1: Group level - distribution of words at group level 
+
+
+Get all unique words for two groups at t1. 
+```{r}
+groups_info <- read_csv("groups_info.csv")
+target_types <- read_csv("target_types_delta_450_1150.csv") %>%
+  mutate(tbin = fct_recode(tbin, 
+                           t1 = "low",
+                           t2 = "high")) %>%
+  mutate(gloss = tolower(gloss))
+
+MIN_KIDS_PRODUCED_WORD <- 3
+
+good_words <- target_types %>%
+  count(gloss, target_child_id) %>% # one row a word-kid
+  count(gloss) %>%
+  filter(nn >= MIN_KIDS_PRODUCED_WORD) # more than n words?
+
+good_kids <- target_types %>%
+  filter(gloss %in% good_words$gloss) %>%
+  count(target_child_id, tbin) %>% # each row a tbin-kid
+  count(target_child_id) %>%
+  filter(nn > 1) # two time points?
+
+# get the good words, filtering on kids and words
+good_types <- target_types %>%
+    filter(gloss %in% good_words$gloss,
+           target_child_id %in% good_kids$target_child_id)
+
+# get t1 words only
+t1_words <- good_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t1") %>%
+  distinct(tbin, delta_resid_group, gloss)
+```
+
+Get word embedings from English fasttext. Only 66 words are missing! (5%).
+
+```{r}
+MODEL_PATH <- "wiki.en.vec"
+OUTPUT_FILE <- "fast_text_childes_words.feather"
+
+####### Get childes words in the model #########
+# model <- fread( 
+#   MODEL_PATH,
+#   header = FALSE,
+#   skip = 1,
+#   quote = "",
+#   encoding = "UTF-8",
+#   data.table = TRUE,
+#   col.names = c("target_word", 
+#                 unlist(lapply(2:301, function(x) paste0("V", x)))))
+# 
+# model_filtered <- model[target_word %in% unique(t1_words$gloss)]
+# write_feather(model_filtered, OUTPUT_FILE)
+
+model_filtered <- read_feather(OUTPUT_FILE)
+```
+
+Get the proportion of kids in each group that knew each word.
+```{r}
+prop_from_each_group_said_word_t1 <- good_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id)))  %>%
+  count(gloss, tbin, delta_resid_group) %>%
+  filter(tbin == "t1") %>%
+  group_by(gloss) %>%
+  mutate(prop = n / dim(groups_info)[1]/2)  %>%
+  select(-tbin, -n)
+```
+
+Get tsne coordinates and kmeans clusters.
+```{r}
+# get tsne coordinates
+tsne_out = Rtsne::Rtsne(as.matrix(model_filtered[,-1]))
+tsne_dims <- tsne_out$Y %>%
+  as.data.frame() %>%
+  rename(tsne_X = V1,
+         tsne_Y = V2)  %>%
+  bind_cols(target_word = model_filtered$target_word) %>%
+  select(target_word, everything()) 
+```
+
+```{r}
+N_CLUSTERS <- 25
+clusters <- kmeans(scale(tsne_dims[,-1]), N_CLUSTERS)
+tsne_dims$cluster = factor(clusters$cluster)
+
+```
+
+### Word clusters (all words)
+```{r}
+diff_in_props_between_groups <- prop_from_each_group_said_word_t1 %>%
+  spread(delta_resid_group, prop) %>%
+  mutate(high = ifelse(is.na(high), 0, high),
+         low = ifelse(is.na(low), 0, low),
+         diff = high - low) %>%
+  arrange(-diff) %>%
+  left_join(distinct(target_types, gloss)) %>%
+  select(gloss, diff, high, low) %>%
+  ungroup()  
+
+tsne_dims %>%
+  left_join(diff_in_props_between_groups %>% 
+              select(gloss, diff), 
+            by = c("target_word" = "gloss")) %>%
+    ggplot(aes(x = tsne_X, y = tsne_Y,   group = cluster, color = cluster)) +
+  geom_text(aes(label = target_word), size = 2) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+pos2 <- read_csv("molly_pos_gloss_coded.csv") %>%
+  select(gloss, stem_gloss, molly_pos)
+
+tsne_dims %>%
+  left_join(pos2 %>% 
+              select(gloss, molly_pos), 
+            by = c("target_word" = "gloss")) %>%
+    ggplot(aes(x = tsne_X, y = tsne_Y,  
+               group = molly_pos, color = molly_pos)) +
+  geom_text(aes(label = target_word), size = 2) +
+  theme_classic() +
+  ggtitle("By POS") +
+  theme(legend.position = "none")
+```
+
+```{r}
+low_words <- prop_from_each_group_said_word_t1 %>%
+  filter(delta_resid_group == "low") %>%
+  select(gloss)
+
+low_embeddings <- tsne_dims %>%
+  filter(target_word %in% low_words$gloss) %>%
+  left_join(prop_from_each_group_said_word_t1 %>% 
+              filter(delta_resid_group == "low"), by = c("target_word" = "gloss")) %>%
+  mutate(group = "low")
+
+high_words <- prop_from_each_group_said_word_t1 %>%
+  filter(delta_resid_group == "high") %>%
+  select(gloss)
+
+high_embeddings <- tsne_dims %>%
+  filter(target_word %in% high_words$gloss) %>%
+  left_join(prop_from_each_group_said_word_t1 %>% 
+              filter(delta_resid_group == "high"), by = c("target_word" = "gloss")) %>%
+  mutate(group = "high")
+
+all_group_embeddings <- bind_rows(low_embeddings, high_embeddings)
+```
+
+### Proportion of kids in each group that knew each word
+```{r, fig.height = 4}
+ggplot(all_group_embeddings, 
+       aes(x = tsne_X, y = tsne_Y,  alpha = prop, color = cluster)) +
+  facet_wrap(~ group) +
+  geom_point() +
+  theme(legend.position = "none")
+```
+
+### Words with greatest difference between two groups
+
+Left: Words that high kids said more
+
+Right: words that low kids said more 
+
+ALPHA = magnitude of difference
+
+```{r, fig.height = 4}
+
+tsne_dims %>%
+  left_join(diff_in_props_between_groups %>% 
+              select(gloss, diff), 
+            by = c("target_word" = "gloss")) %>%
+  mutate(diff_group = ifelse(diff > 0, "high", "low")) %>%
+  ggplot(aes(x = tsne_X, y = tsne_Y,  color = cluster, alpha = abs(diff))) +
+  facet_wrap(~diff_group) +
+  geom_point() +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+#### Words that high kids knew more
+(diff > .01)
+```{r}
+tsne_dims %>%
+  left_join(diff_in_props_between_groups %>% 
+              select(gloss, diff), 
+            by = c("target_word" = "gloss")) %>%
+  filter(diff > .01 ) %>%
+  ggplot(aes(x = tsne_X, y = tsne_Y,   group = cluster, color = cluster)) +
+  geom_text(aes(label = target_word,), size = 2) +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+#### Words that low kids knew more
+(all)
+```{r}
+tsne_dims %>%
+  left_join(diff_in_props_between_groups %>% 
+              select(gloss, diff), 
+            by = c("target_word" = "gloss")) %>%
+  filter(diff < 0 ) %>%
+    ggplot(aes(x = tsne_X, y = tsne_Y,   group = cluster, color = cluster)) +
+  geom_text(aes(label = target_word), size = 2) +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+
+#### Concreteness
+Does diff correlate with concretess? Look at Brysbaert concrteness norms.  Note that ~22% of words are missing in the norms.
+```{r, fig.height = 7}
+brysbaert <- read_csv("/Users/mollylewis/Documents/research/Projects/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  select(Word, Conc.M)
+
+lemmas <- read_csv("form-lemma-en-conllu.csv") %>%
+  mutate(form = tolower(form),
+         lemma = tolower(lemma)) %>%
+  distinct(lemma, .keep_all = T)
+
+#diff_in_props_between_groups %>%
+#  left_join(pos_tagged) %>%
+#  mutate(molly_pos = as.factor(molly_pos)) %>%
+#  arrange(molly_pos) %>%
+#  write_csv("molly_pos_gloss.csv")
+
+diffs_with_concreteness <- diff_in_props_between_groups %>%
+  left_join(lemmas, by = c("gloss" = "form")) %>%
+  mutate(lemma = ifelse(is.na(lemma), gloss, lemma)) %>%
+  left_join(brysbaert, c("lemma" = "Word")) %>%
+  left_join(pos2) %>%
+  mutate(molly_pos = as.factor(molly_pos))
+
+diffs_with_concreteness %>%
+  select(2:5,6, 8) %>%
+  gather("variable", "value", c(-4:-6)) %>%
+  filter(variable == "diff") %>%
+ ggplot(aes(x =  Conc.M, y = value, 
+           color = variable, group = variable)) +
+    facet_wrap(~molly_pos) +
+  #geom_point() +
+  geom_smooth(method = "lm") +
+  theme_classic()
+```
+
+No evidence consitent with idea that difference varies as a function of concreteness.
+
+## Analysis 2: Kid level
+### Mean of each kid's vocabulary (centroid)
+
+```{r}
+good_types_t1 <- good_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t1") %>%
+  left_join(pos2)
+
+good_types_t2 <- good_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t2") %>%
+  left_join(pos2)
+
+group_ids <-  good_types_t1 %>%
+  distinct(target_child_name, 
+         collection_name, 
+         corpus_name , 
+         delta_resid_group)
+
+```
+
+```{r, eval = F}
+get_kid_vocab_centroid <- function(target_child_name,
+                                 collection_name,
+                                 corpus_name,
+                                 df, 
+                                 model){
+  x <- collection_name
+  y <- corpus_name
+  z = target_child_name
+  current_df <- df %>%
+    filter(collection_name == x,
+           corpus_name == y,
+           target_child_name == z)
+
+  centroid <- model %>%
+    filter(target_word %in% current_df$gloss) %>%
+    select(-target_word) %>%
+    colSums(.) %>%
+    t() %>%
+    data.frame() %>%
+    mutate(collection_name = collection_name,
+           corpus_name = corpus_name,
+           target_child_name = target_child_name)
+    
+  centroid
+}
+
+centroids <- good_types_t1 %>%
+  distinct(target_child_name, 
+         collection_name, 
+         corpus_name) %>%
+    mutate_all(as.character()) %>%
+    as.list() %>%
+    pmap_df(get_kid_vocab_centroid,
+              good_types_t1, 
+              model_filtered)
+
+tsne_out <- tsne::tsne(as.matrix(centroids[,-301:-303]))
+tsne_dims <- tsne_out %>%
+  as.data.frame() %>%
+  rename(tsne_X = V1,
+         tsne_Y = V2)  %>%
+  bind_cols(target_child_name = group_ids$target_child_name,
+           delta_resid_group = group_ids$delta_resid_group) %>%
+  select(target_child_name, delta_resid_group, everything())
+
+tsne_dims %>%
+  ggplot(aes(x = tsne_X, y = tsne_Y,   
+               group = delta_resid_group, color = delta_resid_group)) +
+  geom_point() +
+  geom_density_2d() +
+  theme_classic() +
+  theme(legend.position = "none")
+
+```
+No real difference here. 
+
+### Variance of each kid's vocabulary
+
+##### Number of clusters analysis
+
+Optimal number of clusters -  No evidence to suggests different number of clusters in low vs. high words, even when restrict to content words.
+
+```{r, eval = F, include = F}
+# compute average silhouette for k clusters (from: https://uc-r.github.io/kmeans_clustering)
+avg_silhouette <- function(k, df) {
+  km.res <- kmeans(df, centers = k, nstart = 50)
+  ss <- silhouette(km.res$cluster, dist(df))
+  mean(ss[, 3])
+}
+
+# read in raw models from feather
+get_model_data <- function(target_child_name, 
+                      collection_name, 
+                      corpus_name, df, model){
+  
+  x <- collection_name
+  y <- corpus_name
+  z <- target_child_name
+  
+  current_df <- df %>%
+    filter(collection_name == x,
+           corpus_name == y,
+           target_child_name == z)
+
+  model_data <- model %>%
+    filter(target_word %in% current_df$gloss)
+  
+  model_data
+  
+}
+
+# get cluster assignment and model
+get_clusters <- function(d, max_clusters, lang){
+  # tidy and scale data
+  d_clean <- d %>%
+    column_to_rownames("target_word") %>%
+    as.data.frame() %>%
+    scale(.)
+  
+  num_words <- nrow(d_clean)
+  
+  # get model with optimal number of clusters
+  k_values <- if(num_words < 25) {2:(num_words-1)} else {2:max_clusters}
+  avg_sil_values <- map_dbl(k_values, avg_silhouette, d_clean)
+  optimal_num_clusters <- which.max(avg_sil_values) + 1
+  optimal_clusters <- kmeans(d_clean, 
+                             centers = optimal_num_clusters, 
+                             nstart = 25)
+  
+  # return data
+  model_data <- data.frame(explained_var = optimal_clusters$betweenss/optimal_clusters$totss,
+                          nwords = num_words,
+                          n_clusts = length(optimal_clusters$size)) 
+  
+  model_data 
+  
+}
+
+# wrapper function
+get_clusters_from_raw_model_data <- function(target_child_name,
+                                              collection_name,
+                                              corpus_name,
+                                              df, 
+                                              model,
+                                              max_clusters){
+  print(paste0("====== ", target_child_name, " ======"))
+  
+  d <- get_model_data(target_child_name, 
+                      collection_name, 
+                      corpus_name, df, model)
+  out <- get_clusters(d, max_clusters) %>%
+          mutate(target_child_name = target_child_name,
+                 collection_name = collection_name,
+                 corpus_name = corpus_name) %>%
+          select(target_child_name,collection_name, corpus_name, everything() )
+  out
+}
+
+MAX_CLUSTERS <- 25
+## only look at participants who know at least 2 words
+good_participants <- (good_types_t1 %>%  
+                        filter(molly_pos %in% c("Verb", "Noun", "Verb-Noun", "Adjective")) %>%
+                        group_by(target_child_id) %>% 
+                        summarize(n = n()) %>% 
+                        filter(n > 4))$target_child_id
+
+num_clusts_by_kid <- good_types_t1 %>%
+  filter(target_child_id %in% good_participants) %>%
+  filter(molly_pos %in% c("Verb", "Noun", "Verb-Noun", "Adjective")) %>%
+  distinct(target_child_name, 
+         collection_name, 
+         corpus_name) %>%
+    mutate_all(as.character()) %>%
+    as.list() %>%
+    pmap_df(get_clusters_from_raw_model_data, 
+            good_types_t1, model_filtered, MAX_CLUSTERS)
+
+d <- num_clusts_by_kid %>% 
+    left_join(group_ids) %>%
+    mutate_if(is.character, as.factor)
+
+d %>%
+  group_by(delta_resid_group) %>%
+  multi_boot_standard(col = "explained_var")
+
+summary(glm(delta_resid_group ~ log(n_clusts) + nwords, family = "binomial", d))
+```
+
+
+#### Pairwise word distance
+
+Kids in the low bin tend to know words that are less similiar to eachother (and their within-vocab similarity is more variable), compared to high kids. This holds controling for number of words. This is for content words only - V, N, Adj.
+
+```{r}
+# read in raw models from feather
+get_model_data2 <- function(target_child_name, 
+                      collection_name, 
+                      corpus_name,  df, molly_pos, model){
+
+  x <- collection_name
+  y <- corpus_name
+  z <- target_child_name
+  g <- molly_pos
+  
+  current_df <- df %>%
+    filter(collection_name == x,
+           corpus_name == y,
+           target_child_name == z,
+           molly_pos == g)
+
+  model_data <- model %>%
+    filter(target_word %in% current_df$gloss)
+  
+  model_data
+  
+}
+
+get_pairwise_dist_beween_words <- function(d){
+  model_matrix <- d %>%
+    select(-1) %>%
+    as.matrix()
+  
+  word_word_dists <- philentropy::distance(model_matrix, 
+                           method = "cosine")
+  
+  data.frame(mean_word_dist = mean(word_word_dists, na.rm = T),
+             median_word_dist = median(word_word_dists, na.rm = T),
+             sd_word_dist = sd(as.vector(word_word_dists)),
+             nwords = dim(model_matrix)[1])
+}
+
+# wrapper function
+get_pairwise_dists_from_raw_model_data <- function(target_child_name,
+                                              collection_name,
+                                              corpus_name,
+                                              molly_pos,
+                                              df, 
+                                              model){
+  #print(paste0("====== ", target_child_name, " ======"))
+  
+  d <- get_model_data2(target_child_name, 
+                      collection_name, 
+                      corpus_name, df, molly_pos, model)
+  
+  out <- get_pairwise_dist_beween_words(d) %>%
+          mutate(target_child_name = target_child_name,
+                 collection_name = collection_name,
+                 corpus_name = corpus_name,
+                 pos = molly_pos) %>%
+          select(target_child_name, collection_name, 
+                 corpus_name, pos, everything())
+  out
+}
+
+good_types_t1_pos <- good_types_t1 %>%
+    left_join(pos2) %>%
+    filter(molly_pos %in% c("Verb", "Noun", "Verb-Noun", "Adjective")) %>%
+    #filter(!(molly_pos %in% c("Interjection", "Proper_Name", "other", "Onomatopoeia", "Conjunctions", "Quantifier", "Pronoun", "Preposition", "Question", "Definite Article", "Adverbs"))) %>%
+    mutate(molly_pos = "content") 
+
+mean_pairwise_dists <- good_types_t1_pos %>%
+  filter(gloss %in% model_filtered$target_word) %>%
+  distinct(target_child_name, 
+          collection_name, 
+          corpus_name,
+          molly_pos) %>%
+    mutate_all(as.character()) %>%
+    as.list() %>%
+    pmap_df(get_pairwise_dists_from_raw_model_data, 
+            good_types_t1_pos, model_filtered)
+
+pairwise_df <- mean_pairwise_dists %>% 
+    left_join(group_ids) %>%
+    mutate_if(is.character, as.factor) 
+
+tidy(glm(delta_resid_group ~  log(sd_word_dist)  + mean_word_dist  + nwords, 
+              family = "binomial", d = pairwise_df)) %>%
+  kable()
+
+
+```
+

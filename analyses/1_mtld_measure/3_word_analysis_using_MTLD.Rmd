@@ -1,0 +1,205 @@
+---
+title: MTLD Analyses
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(tidyr)
+library(broom)
+theme_set(theme_classic(base_size = 10))
+```
+
+```{r, include = F, eval = F }
+FINDINGS:
+
+- frequency is correlated with diff score (prop high - prop low): High kids more likely to know high frequency words
+- babiness also correlated - low kids know more babish words
+- marginal effect of concreteness - low kinds know more concrete words
+- at kid level, high kids have vocabs with higher diff score, high concreteness; less iconic and less frequent.
+```
+
+
+```{r, include = F}
+## MTLD scores
+#Here's what the MTLD score looks like by tbin and delta group:
+#type_data <- read_csv("data/target_types_for_MTLD_kids_600_900.csv")
+#groups_info<- read_csv("data/groups_info_diff_600_900.csv") 
+type_data <- read_csv("data/target_types_for_MTLD_kids_600_900.csv") %>%
+    group_by(target_child_id, tbin, gloss) %>%
+    summarize(count = sum(count)) %>%
+    ungroup()
+groups_info<- read_csv("data/groups_info_diff_600_900.csv") 
+
+MINCOUNT <- 0 ### this matters a lot (how many times each kid says a word)
+
+target_types_clean <- type_data %>%
+  filter(count >= MINCOUNT) %>%
+  mutate(gloss = tolower(gloss))  %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) 
+
+word_means <- target_types_clean %>%
+  count(target_child_name, tbin, delta_resid_group) %>% 
+  group_by(tbin, delta_resid_group) %>%
+  langcog::multi_boot_standard(col = "n", na.rm = T) 
+
+word_means %>%
+  ungroup() %>%
+  ggplot(aes(x = tbin, y = mean, color = delta_resid_group)) +
+  geom_line(aes(group = delta_resid_group)) +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper)) +
+  geom_point()
+```
+
+
+
+
+## Words at t1 
+
+### by mtld delta group
+```{r}
+t1_words <- target_types_clean %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t1") %>%
+  distinct(tbin, delta_resid_group, gloss)
+
+# get all t1 low/high words
+t1_words_low <- filter(t1_words, delta_resid_group == "low")
+t1_words_high <- filter(t1_words, delta_resid_group == "high")
+```
+
+```{r}
+prop_from_each_group_said_word_t1 <- target_types_clean %>%
+  filter(tbin == "t1") %>%
+  count(gloss, delta_resid_group) %>%
+  group_by(delta_resid_group) %>%
+  mutate(total = case_when(delta_resid_group == "low" ~ 
+                              nrow(filter(groups_info, delta_resid_group == "low")),
+                           delta_resid_group == "high"~ 
+                             nrow(filter(groups_info, delta_resid_group == "high")))) %>%
+  mutate(prop = n / total)  %>%
+  select(-total, -n) %>%
+  group_by(delta_resid_group, gloss) %>%
+  arrange(delta_resid_group, -prop) 
+
+diff_in_props_between_groups <- prop_from_each_group_said_word_t1 %>%
+  spread(delta_resid_group, prop) %>%
+  mutate(high = ifelse(is.na(high), 0, high),
+         low = ifelse(is.na(low), 0, low),
+         diff = high - low) %>%
+  arrange(-diff) %>%
+  ungroup() 
+
+DT::datatable(diff_in_props_between_groups, 
+              caption = "Proportion of kids in each group that said each word, and the difference in proportions.")
+```
+Diff = prop high - prop low that know a word
+
+### Diff score correlation with other predictors
+```{r, fig.height = 6}
+concreteness <- read_csv("data/control_variables/brysbaert_corpus.csv")
+freq <- read_tsv("data/control_variables/SUBTLEXus_corpus.txt")
+babbiness <- read_csv("data/control_variables/babiness_iconicity.csv")
+
+diff_with_predictors <- diff_in_props_between_groups %>%
+  left_join(concreteness %>% select(Word, Conc.M) %>% distinct(), by = c("gloss" = "Word")) %>%
+  left_join(freq %>% select(Word, Lg10WF) %>% distinct(), by = c("gloss" = "Word")) %>%
+  left_join(babbiness %>% select(word, iconicity, babiness)  %>% distinct(), by = c("gloss" = "word")) %>%
+    rename(concreteness = Conc.M,
+          log_frequency = Lg10WF,
+          prop_group_diff = diff)
+
+diff_with_predictors_long <- diff_with_predictors %>%
+  select(-high, -low) %>%
+  gather(measure, value, -gloss, -prop_group_diff) 
+
+ggplot(diff_with_predictors_long, aes(x = value, y = prop_group_diff)) +
+  geom_point(aes(color = measure), size = .6) +
+  ggtitle("Diff score correlations with other measures") +
+  geom_smooth(method = "lm") +
+  facet_wrap(~measure, scales = "free") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+diff_with_predictors_long %>%
+  group_by(measure) %>%
+  do(tidy(cor.test(.$prop_group_diff, .$value))) %>%
+  select(measure, estimate, statistic, p.value) %>%
+  kable()
+```
+
+
+## Kid level analyses
+
+### categorical MTLD groups
+The units here are invidiual kid's vocabulary sets at t1.
+```{r, fig.height = 2}
+kid_measures_long <- target_types_clean %>%
+  filter(tbin == "t1") %>%
+  left_join(diff_in_props_between_groups %>% select(gloss, diff)) %>%
+  left_join(concreteness %>% select(Word, Conc.M) %>% distinct(), by = c("gloss" = "Word")) %>%
+  left_join(freq %>% select(Word, Lg10WF) %>% distinct(), by = c("gloss" = "Word")) %>%
+  left_join(babbiness %>% select(word, iconicity, babiness)  %>% distinct(), by = c("gloss" = "word"))  %>%
+  rename(concreteness = Conc.M,
+         log_frequency = Lg10WF,
+         prop_group_diff = diff) %>%
+  gather("measure", "value", c(-1:-9)) %>%
+  mutate(measure = as.factor(measure))  
+
+kid_ms <- kid_measures_long %>%
+  group_by(target_child_id, measure, delta_resid_group) %>%
+  summarize(mean_value = mean(value, na.rm = T))
+
+kid_ms %>%
+  group_by(delta_resid_group, measure) %>%
+  multi_boot_standard(col = "mean_value", na.rm = T)  %>% 
+  ggplot(aes(x = delta_resid_group, y = mean, 
+              group = delta_resid_group, fill = delta_resid_group)) +
+  facet_wrap(~measure, scales = "free_y", ncol = 5) +
+  ylab("predictor") +
+  xlab("vocab group") +
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position=position_dodge(width=0.9)) +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+### continuous MTLD 
+Here's the same analysis as above but now i'm using the continous MTLD score.
+```{r}
+kid_ms_continuous_long <- kid_ms %>%
+  left_join(groups_info %>% select(target_child_id, delta_resid))  %>%
+  ungroup()
+
+ggplot(kid_ms_continuous_long, aes(x = mean_value, y = delta_resid)) +
+  geom_point(aes(color = measure), size = .6) +
+  ggtitle("MTLD scores predicted by other measures") +
+  geom_smooth(method = "lm") +
+  facet_wrap(~measure, scales = "free") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+kid_ms_continuous_long %>%
+  group_by(measure) %>%
+  do(tidy(cor.test(.$delta_resid, .$mean_value))) %>%
+  select(measure, estimate, statistic, p.value) %>%
+  kable()
+
+```

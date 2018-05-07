@@ -1,0 +1,228 @@
+---
+title: MTLD words by usefuleness
+subtitle: defined as trigrams from cocoa
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+library(broom)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+Do kids that know words at T2 (using mtld measure) know words that are more "useful" at T1? In particular, we define useful words to be words that allow you to make more trigrams in adult speech using coca spoken corpus (https://corpus.byu.edu/coca/).
+
+FINDINGS:
+  
+  - no evidence for more probable trigrams for high vs. low kids at either group or individual level
+  - Evidence that high kids have words for more frequent trigrams at group but not individual level
+  - effect somewhat sensitive to number of words cutoff (effect bigger with fewer words)
+  - but, lots of trigrams missing
+
+## Group level {.tabset}
+
+```{r}
+# Get all unique words for two groups at t1. 
+groups_info <- read_csv("../1_exploration/groups_info.csv")
+target_types <- read_csv("../1_exploration/target_types_delta_450_1150.csv") %>%
+  mutate(tbin = fct_recode(tbin, 
+                           t1 = "low",
+                           t2 = "high")) %>%
+  mutate(gloss = tolower(gloss))
+
+TOPNWORDS_PER_GROUP <- 500
+
+t1_words <- target_types %>%
+  filter(tbin == "t1") %>% # #t1 only
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>% # merge in group info
+  group_by(delta_resid_group, gloss)  %>% # get glosses by group
+  summarize(n = n()) %>% # get gloss counts by group
+  top_n(TOPNWORDS_PER_GROUP) %>%
+  group_by(delta_resid_group)  %>%
+  slice(1:TOPNWORDS_PER_GROUP) %>%
+  arrange(delta_resid_group, -n)
+```
+
+```{r}
+coca_trigrams <- read_csv("coca_trigrams.csv") %>%
+  select(w1, w2, w3, prob3, freq3) %>%
+  data.table() 
+
+t1_words_high <- t1_words %>%
+                    filter(delta_resid_group == "high") %>%
+                    select(gloss) %>%
+  unlist(use.names = F)
+
+t1_words_low <- t1_words %>%
+                    filter(delta_resid_group == "low") %>%
+                    select(gloss) %>%
+  unlist(use.names = F)
+
+high_trigrams <- coca_trigrams[w1 %in% t1_words_high &
+                                 w2 %in% t1_words_high & 
+                                 w3 %in% t1_words_high] %>%
+  mutate(vocab_group = "high")
+
+low_trigrams <- coca_trigrams[w1 %in% t1_words_low &
+                                 w2 %in% t1_words_low & 
+                                 w3 %in% t1_words_low] %>%
+  mutate(vocab_group = "low")
+
+all_trigrams <- bind_rows(high_trigrams, low_trigrams) %>%
+  mutate(log_freq = log(freq3))
+```
+
+### Transitional probability
+```{r}
+ggplot(all_trigrams, aes(x = prob3, 
+                         fill = vocab_group, 
+                         group = vocab_group)) +
+  geom_density(alpha = .4)
+
+all_trigrams %>%
+  group_by(vocab_group) %>%
+  multi_boot_standard(col = "prob3", na.rm = T) %>%
+  ggplot(aes(x = vocab_group, y = mean, group = vocab_group,
+               fill = vocab_group)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position=position_dodge(width=0.9)) +
+  theme_classic()
+```
+
+### Frequency
+```{r}
+ggplot(all_trigrams, aes(x = log_freq,  
+                         fill = vocab_group, 
+                         group = vocab_group)) +
+  geom_density(alpha = .4)
+
+all_trigrams %>%
+  group_by(vocab_group) %>%
+  multi_boot_standard(col = "log_freq", na.rm = T) %>%
+    ggplot(aes(x = vocab_group, y = mean, group = vocab_group, 
+               fill = vocab_group)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position=position_dodge(width=0.9)) +
+  theme_classic()
+```
+
+
+## Individual Kids {.tabset}
+### Transitional probability
+```{r}
+good_types_t1 <- target_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t1")
+
+get_trigrams_by_kid <- function(df, all_trigrams){
+     current_trigrams <- all_trigrams[w1 %in% df$gloss &
+                                 w2 %in% df$gloss & 
+                                 w3 %in% df$gloss] 
+     
+     mean(current_trigrams$prob3, na.rm = T)
+  
+}
+
+group_ids <-  good_types_t1 %>%
+  distinct(target_child_id, 
+         delta_resid_group)
+
+trigram_freqs_by_kid <- good_types_t1 %>%
+              nest(-target_child_id, -tbin) %>%
+              mutate(mean_trigram_probability = 
+                       map(data, get_trigrams_by_kid,
+                           coca_trigrams)) %>%
+            select(-data) %>%
+            unnest() %>%
+            left_join(groups_info %>% select(target_child_id, delta_resid_group)) 
+
+
+ggplot(trigram_freqs_by_kid, 
+       aes(x = mean_trigram_probability, 
+                         fill = delta_resid_group, 
+                         group = delta_resid_group)) +
+  geom_density(alpha = .4)
+
+
+trigram_freqs_by_kid %>%
+  group_by(delta_resid_group) %>%
+  multi_boot_standard(col = "mean_trigram_probability",
+                      na.rm = T) %>%
+    ggplot(aes(x = delta_resid_group, y = mean, group = delta_resid_group, fill = delta_resid_group)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position=position_dodge(width=0.9)) +
+  theme_classic()
+
+```
+
+
+### Frequency
+```{r}
+good_types_t1 <- target_types %>%
+  left_join(groups_info %>% 
+              mutate(target_child_id = as.numeric(target_child_id))) %>%
+  filter(tbin == "t1")
+
+get_trigrams_by_kid <- function(df, all_trigrams){
+     current_trigrams <- all_trigrams[w1 %in% df$gloss &
+                                 w2 %in% df$gloss & 
+                                 w3 %in% df$gloss] 
+     
+     mean(log(current_trigrams$freq3), na.rm = T)
+  
+}
+
+group_ids <-  good_types_t1 %>%
+  distinct(target_child_id, 
+         delta_resid_group)
+
+trigram_freqs_by_kid <- good_types_t1 %>%
+              nest(-target_child_id, -tbin) %>%
+              mutate(log_mean_trigram_freq= 
+                       map(data, get_trigrams_by_kid,
+                           coca_trigrams)) %>%
+            select(-data) %>%
+            unnest() %>%
+            left_join(groups_info %>% select(target_child_id, delta_resid_group))
+
+
+ggplot(trigram_freqs_by_kid, 
+       aes(x = log_mean_trigram_freq, 
+                         fill = delta_resid_group, 
+                         group = delta_resid_group)) +
+  geom_density(alpha = .4)
+
+
+trigram_freqs_by_kid %>%
+  group_by(delta_resid_group) %>%
+  multi_boot_standard(col = "log_mean_trigram_freq",
+                      na.rm = T) %>%
+  ggplot(aes( x = delta_resid_group, y = mean, group = delta_resid_group, fill = delta_resid_group)) +
+  geom_bar(position = "dodge", stat = "identity") +
+  geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
+                 position=position_dodge(width=0.9)) +
+  theme_classic()
+
+```
