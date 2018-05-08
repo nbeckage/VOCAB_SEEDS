@@ -43,9 +43,9 @@ type_data <- read_csv("data/target_types_for_MTLD_kids_600_900.csv") %>%
     group_by(target_child_id, tbin, gloss) %>%
     summarize(count = sum(count)) %>%
     ungroup()
-groups_info<- read_csv("data/groups_info_diff_600_900.csv") 
+groups_info<- read_csv("data/groups_info_600_900.csv") 
 
-MINCOUNT <- 0 ### this matters a lot (how many times each kid says a word)
+MINCOUNT <- 5  ### this matters a lot (how many times each kid says a word)
 
 target_types_clean <- type_data %>%
   filter(count >= MINCOUNT) %>%

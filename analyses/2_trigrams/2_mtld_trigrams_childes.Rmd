@@ -27,17 +27,30 @@ library(broom)
 theme_set(theme_classic(base_size = 10))
 ```
 
-Do kids that know more words at T2 (using mtld measure) know words that are more "useful" at T1? In particular, we define useful words to be words that allow you to make more trigrams in adult speech from childes (child-directed). Because high kids have bigger vocabs, we sample TOPNWORDS_PER_GROUP.
+Do kids that know more words at T2 (using mtld measure) know words that are more "useful" at T1? In particular, we define useful words to be words that allow you to make more trigrams in adult speech from childes (child-directed). Because high kids have bigger vocabs, we sample n words per group (here, 500).
+
+It turns out, that the  pattern of effects depends a lot on what you set the threshold value for knowing a word to be. The results shown here are where the threhold is set at 5 occurences (but it looks different if it's set to 1.)
 
 FINDINGS:
+
+Min occurences of word in vocab = 1:
+
+* At the group level, the high group produces more frequent trigrams, controling for the frequency of the individual words.
+* At the kid level, there are no effect when controlling for word frequency
+
+Min occurences of word in vocab = 5:
+
+* At the group level, the high group produces more frequent trigrams, controling for the frequency of the individual words.
+*  At the kid level, high kids produce more trigrams controling for frequency of words in kids' vocab (there are a number of kids missing here though, either because they don't produce words at least 5 times or their words are not in the sampled words)
+* At kid level, low kids produce more frequent trigrams, controling for vocab word frequency
 
 
 
 ## Group level  {.tabset}
 
 ```{r}
-MINCOUNT <- 0
-TOPNWORDS_PER_GROUP <- 500
+MINCOUNT <- 1
+TOPNWORDS_PER_GROUP <- 2000
 
 # Get all unique words for two groups at t1. 
 groups_info <- read_csv("../1_mtld_measure/data/groups_info_600_900.csv")
@@ -72,7 +85,6 @@ t1_words_high <- t1_words %>%
                     select(gloss) %>%
   unlist(use.names = F)
 
-
 t1_words_low <- t1_words %>%
     ungroup() %>%
                     filter(delta_resid_group == "low") %>%
@@ -90,6 +102,33 @@ low_trigrams <- childes_trigrams[w1 %in% t1_words_low &
   mutate(vocab_group = "low")
 
 all_trigrams <- bind_rows(high_trigrams, low_trigrams)
+```
+
+raster plot
+
+```{r, eval = F}
+trigram_raster_data <- full_join(high_trigrams, low_trigrams) %>%
+  unite(trigram, w1, w2, w3) %>%
+  spread(vocab_group, freq) %>%
+  mutate(high= ifelse(!is.na(high), TRUE, FALSE),
+         low = ifelse(!is.na(low), TRUE, FALSE)) %>%
+  left_join(childes_trigrams %>% unite(trigram, w1, w2, w3)) %>%
+  mutate(log_trigram_freq = log(freq)) %>%
+  select(-freq) %>%
+  arrange(log_trigram_freq) %>%
+  filter(log_trigram_freq > 1) %>%
+  gather("group", "value", c(-1,-4,-5))
+
+ggplot(trigram_raster_data, 
+      aes(x = reorder(trigram, log_trigram_freq), y = group, fill = value))+
+      xlab("trigram (low to high frequency)") +
+      scale_fill_manual(values = c("white", "red")) +
+      ylab("vocab group")+
+      geom_tile() +
+      theme(legend.position = "none",
+         #  axis.text.x = element_text(angle = 90, hjust = 1))
+            axis.text.x=element_blank())
+
 ```
 
 ### number of trigrams
@@ -114,7 +153,6 @@ all_trigrams %>%
   #          ci_lower_freq = mean(log_freq) - (1.96 * sd(log_freq)),
   #          ci_upper_freq = mean(log_freq) + (1.96 * sd(log_freq)))
   
-
  all_trigrams %>%
   group_by(vocab_group) %>%
   multi_boot_standard(col = "freq", na.rm = T) %>%
@@ -123,7 +161,42 @@ all_trigrams %>%
 ```
 
 
-## Individual Kids  {.tabset}
+```{r}
+freq <- read_tsv("../1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
+  select(Word, Lg10WF)
+
+freq_tidy <- freq %>%
+  mutate(Word = tolower(Word)) %>%
+  rename(w1 = Word,
+         log_freq1 = Lg10WF) %>%
+  mutate(w2 = w1,
+         log_freq2 = log_freq1,
+         w3 = w1,
+         log_freq3 = log_freq1) 
+
+all_trigrams_with_freq <- all_trigrams %>%  
+  left_join(freq_tidy %>% select(w1, log_freq1)) %>%
+  left_join(freq_tidy %>% select(w2, log_freq2)) %>%
+  left_join(freq_tidy %>% select(w3, log_freq3))  %>%
+  rowwise()%>%
+  mutate(mean_word_freq = mean(c(log_freq1, log_freq2, log_freq3), 
+                          na.rm = T),
+         max_word_freq =  max(c(log_freq1, log_freq2, log_freq3), 
+                          na.rm = T),
+         log_trigram_freq = log(freq)) %>%
+  select(vocab_group, log_trigram_freq, max_word_freq, mean_word_freq)
+
+lm(log_trigram_freq ~ vocab_group + mean_word_freq, d = all_trigrams_with_freq) %>%
+  summary()
+
+lm(log_trigram_freq ~ vocab_group + max_word_freq, d = all_trigrams_with_freq %>% filter(is.finite(max_word_freq))) %>%
+  summary()
+```
+
+Kids in the high group produce high frequency trigrams, contoling for the mean frequency of the words/max frequency of the words in the trigrams.
+
+
+## Individual kids  {.tabset}
 ```{r}
 good_types_t1 <- target_types %>%
   left_join(groups_info %>% 
@@ -131,36 +204,106 @@ good_types_t1 <- target_types %>%
   filter(tbin == "t1") %>%
   filter(gloss %in% t1_words$gloss)
 
-get_trigrams_by_kid <- function(df, all_trigrams, measure){
+get_trigrams_by_kid <- function(df, all_trigrams, measure, freq){
      current_trigrams <- all_trigrams[w1 %in% df$gloss &
                                  w2 %in% df$gloss & 
-                                 w3 %in% df$gloss] 
+                                 w3 %in% df$gloss]  
+    
+      vocab_freqs <- df %>%
+          left_join(freq, by = c("gloss" = "Word")) 
      
+     mean_freq <- mean(vocab_freqs$Lg10WF, na.rm = T )
+     median_freq <- median(vocab_freqs$Lg10WF, na.rm = T )
+
      if (measure == "num"){
-      nrow(current_trigrams)
+      list(log_trigram_num = log(nrow(current_trigrams)), 
+           mean_word_freq = mean_freq, 
+           median_word_freq = median_freq)
+
      } else if (measure == "freq"){
-      mean(log(current_trigrams$freq))
+      list(mean_trigram_freq = mean(log(current_trigrams$freq)), 
+           mean_word_freq = mean_freq, 
+           median_word_freq = median_freq)
      }
+}
+
+get_trigrams_by_kid_raw <- function(df, all_trigrams){
+     current_trigrams <- all_trigrams[w1 %in% df$gloss &
+                                 w2 %in% df$gloss & 
+                                 w3 %in% df$gloss]   %>%
+       unite(trigram, w1, w2, w3)
+     
+     current_trigrams$trigram
+    
 }
 ```
 
-### Number
+raster plot
+```{r, eval = F}
+trigram_num_by_kid <- good_types_t1 %>%
+              nest(-target_child_id, -tbin) %>%
+              mutate(trigram = 
+                       map(data, get_trigrams_by_kid_raw,
+                           childes_trigrams)) %>%
+  select(-tbin, -data) %>%
+  unnest()
+
+trigram_num_by_kid %>%
+  rowwise()%>%
+  mutate(num = length(unlist(trigram)))
+
+kid_trigrams <- trigram_num_by_kid %>% 
+  left_join(groups_info %>% select(target_child_id, delta_resid_group)) %>%
+  left_join(childes_trigrams %>% unite(trigram, w1, w2, w3)) %>%
+  mutate(log_trigram_freq = log(freq)) %>%
+  select(-freq)  %>%
+  mutate(target_child_id = as.factor(target_child_id))
+
+m = kid_trigrams %>%
+  sample_n(10) %>%
+  arrange(log_trigram_freq)
+
+ggplot(m, 
+       aes(x = fct_reorder(trigram, log_trigram_freq), 
+                         fill = delta_resid_group,
+                         y = as.numeric(droplevels(target_child_id))))+
+    ylab("target_child_id") +
+    geom_tile() +
+    xlab("trigram") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+            axis.text.x=element_blank())
+
+ggplot(kid_trigrams %>% filter(log_trigram_freq > 0), 
+       aes(x = fct_reorder(trigram, log_trigram_freq), 
+                         fill = delta_resid_group,
+                         y = as.numeric(droplevels(target_child_id))))+
+    ylab("target_child_id") +
+    geom_tile() +
+    xlab("trigram") +
+    theme(#  axis.text.x = element_text(angle = 90, hjust = 1))
+            axis.text.x=element_blank())
+  
+```
+
+### number of trigrams 
 
 ```{r}
 trigram_num_by_kid <- good_types_t1 %>%
               nest(-target_child_id, -tbin) %>%
-              mutate(trigram_num = 
+              mutate(kid_measures = 
                        map(data, get_trigrams_by_kid,
-                           childes_trigrams, "num")) %>%
-            select(-data) %>%
-            unnest() %>%
-            left_join(groups_info %>% select(target_child_id, delta_resid_group)) %>%
-            mutate(log_trigram_num = log(trigram_num)) 
-
-
+                           childes_trigrams, "num", freq),
+                     kid_measure_names = list(c("log_num_trigrams",  # this is bad
+                                                "mean_word_freq",
+                                                "median_word_freq"))) %>%
+              select(-data) %>%
+              unnest() %>%
+              mutate(kid_measures = unlist(kid_measures)) %>%
+              left_join(groups_info %>% select(target_child_id, delta_resid_group)) %>%
+              spread(kid_measure_names, kid_measures)
 
 ggplot(trigram_num_by_kid, 
-       aes(x = log_trigram_num, 
+       aes(x = log_num_trigrams, 
                          fill = delta_resid_group, 
                          group = delta_resid_group)) +
   geom_density(alpha = .4) +
@@ -168,14 +311,14 @@ ggplot(trigram_num_by_kid,
 
 
 ggplot(trigram_num_by_kid, 
-       aes(x = log_trigram_num, 
+       aes(x = log_num_trigrams, 
                          fill = delta_resid_group)) +
        geom_histogram() +
   theme_classic()
 
 trigram_num_by_kid %>%
   group_by(delta_resid_group) %>%
-  multi_boot_standard(col = "log_trigram_num", na.rm = T) %>%
+  multi_boot_standard(col = "log_num_trigrams", na.rm = T) %>%
     ggplot(aes( x = delta_resid_group, y = mean, 
                 group = delta_resid_group, fill = delta_resid_group)) +
   geom_bar(position = "dodge", stat = "identity") +
@@ -184,18 +327,40 @@ trigram_num_by_kid %>%
   theme_classic()
 ```
 
+```{r}
+lm(log_num_trigrams ~ delta_resid_group + mean_word_freq, 
+   d = trigram_num_by_kid %>% filter(is.finite(log_num_trigrams))) %>%
+  summary()
 
-### Frequency
+lm(log_num_trigrams ~ mean_word_freq, 
+   d = trigram_num_by_kid %>% filter(is.finite(log_num_trigrams))) %>%
+  summary()
+
+lm(log_num_trigrams ~ delta_resid_group, 
+   d = trigram_num_by_kid %>% filter(is.finite(log_num_trigrams))) %>%
+  summary()
+
+lm(log_num_trigrams ~ delta_resid_group + median_word_freq, 
+   d = trigram_num_by_kid %>% filter(is.finite(log_num_trigrams))) %>%
+  summary()
+
+```
+
+### frequency of trigrams 
 ```{r}
 trigram_freqs_by_kid <- good_types_t1 %>%
               nest(-target_child_id, -tbin) %>%
-              mutate(log_mean_trigram_frequency = 
+              mutate(kid_measures = 
                        map(data, get_trigrams_by_kid,
-                           childes_trigrams, "freq")) %>%
+                           childes_trigrams, "freq", freq),
+                     kid_measure_names = list(c("log_mean_trigram_frequency",  # this is bad
+                                                "mean_word_freq",
+                                                "median_word_freq"))) %>%
             select(-data) %>%
             unnest() %>%
-            left_join(groups_info %>% select(target_child_id, delta_resid_group))
-
+            mutate(kid_measures = unlist(kid_measures)) %>%
+            left_join(groups_info %>% select(target_child_id, delta_resid_group)) %>%
+            spread(kid_measure_names, kid_measures)
 
 ggplot(trigram_freqs_by_kid, 
        aes(x = log_mean_trigram_frequency, 
@@ -213,4 +378,19 @@ trigram_freqs_by_kid %>%
   geom_linerange(aes(ymin = ci_lower, ymax = ci_upper), 
                  position=position_dodge(width=0.9)) +
   theme_classic()
+```
+
+```{r}
+lm(log_mean_trigram_frequency ~ delta_resid_group + mean_word_freq, d = trigram_freqs_by_kid) %>%
+  summary()
+
+lm(log_mean_trigram_frequency ~ delta_resid_group + median_word_freq, d = trigram_freqs_by_kid) %>%
+  summary()
+
+```
+
+```{r}
+all_bykid <- full_join( trigram_num_by_kid, trigram_freqs_by_kid%>% select(log_mean_trigram_frequency, target_child_id))
+write_csv(all_bykid, "trigrams_by_kid_MIN1.csv")
+
 ```
