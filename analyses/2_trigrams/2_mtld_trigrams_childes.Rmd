@@ -49,8 +49,8 @@ Min occurences of word in vocab = 5:
 ## Group level  {.tabset}
 
 ```{r}
-MINCOUNT <- 1
-TOPNWORDS_PER_GROUP <- 2000
+MINCOUNT <- 5
+TOPNWORDS_PER_GROUP <- 500
 
 # Get all unique words for two groups at t1. 
 groups_info <- read_csv("../1_mtld_measure/data/groups_info_600_900.csv")
@@ -389,8 +389,22 @@ lm(log_mean_trigram_frequency ~ delta_resid_group + median_word_freq, d = trigra
 
 ```
 
-```{r}
-all_bykid <- full_join( trigram_num_by_kid, trigram_freqs_by_kid%>% select(log_mean_trigram_frequency, target_child_id))
-write_csv(all_bykid, "trigrams_by_kid_MIN1.csv")
+```{r, eval = F}
+by_kid_vocab <- target_types %>%
+  filter(tbin == "t1") %>%
+  count(target_child_id) %>%
+  rename(total_vocab_size = n)
+
+all_by_kid <-  trigram_num_by_kid %>%
+                  full_join(trigram_freqs_by_kid %>% 
+                              select(log_mean_trigram_frequency, target_child_id)) %>%
+  left_join(by_kid_vocab)
+
+
+#write_csv(all_by_kid, "trigrams_by_kid_MIN5.csv")
+
+all_by_kid %>%
+  group_by(delta_resid_group) %>%
+  summarize_all(.funs = "mean", na.rm = T)
 
 ```

@@ -11,7 +11,7 @@ library(tidyverse)
 
 INFILE_NA <- "data/diversity_measures_by_age_NA.csv"
 INFILE_UK <- "data/diversity_measures_by_age_UK.csv"
-GROUPS_OUTFILE <- "data/groups_info_600_1000.csv"
+GROUPS_OUTFILE <- "data/groups_info_600_900.csv"
 NDAYS_PER_YEAR <- 365.2422
 #(ages defined below)
 
@@ -74,11 +74,11 @@ get_n_kids_per_cutoff <- function(current_value, this_range){
              range = this_range)
 }
 
-RANGE <- 200 # of timpoints (days)
+RANGE <- 150 # of timpoints (days)
 nkids <- map_df(seq(100, 1700, by = 50), get_n_kids_per_cutoff, RANGE)
 nkids
 # Bin transcripts into timpoints
-OPTIMAL_CUTOFF <- 800
+OPTIMAL_CUTOFF <- 750
 min_age <- OPTIMAL_CUTOFF - RANGE
 max_age <- OPTIMAL_CUTOFF + RANGE
 
@@ -156,7 +156,7 @@ kid_groups <- delta_mtld_with_resids %>%
                                     "high", "low"))
 
 groups_info <- kid_groups %>%
-  select(target_child_id, delta_resid_group, delta_resid) %>%
+  #select(target_child_id, delta_resid_group, delta_resid) %>%
   left_join(longitudinal_transcripts %>% distinct(target_child_id,
                                    target_child_name, 
                                    collection, corpus_name))  %>%
