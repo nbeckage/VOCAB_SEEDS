@@ -42,8 +42,11 @@ target_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_
   group_by(target_child_id, tbin, gloss) %>%
   summarize(count = sum(count)) %>%
   ungroup() %>%
-  filter(count >= MINCOUNT) %>%
-  mutate(gloss = tolower(gloss))
+  mutate(gloss = tolower(gloss)) %>%
+  filter(count >= MINCOUNT) 
+ # mutate(gloss = tolower(gloss)) %>%
+ # group_by(gloss) %>%
+ # summarize(count = sum(count))
 
 ```
 
@@ -148,8 +151,7 @@ full_df <- list(trigram_freq_by_kid_t1,
      MTLD_delta,
      vocab_delta, 
      word_freq_by_kid_t1) %>%
-  accumulate(full_join) %>%
-  last() %>%
+  reduce(full_join) %>%
   select(target_child_id, vocab_delta, vocab_t1, vocab_t2, mtld_delta, mtld_t1,
          mtld_t2, age_diff, mean_log_word_freq_t1, log_num_trigrams_t1, mean_log_freq_trigrams_t1) 
 ```

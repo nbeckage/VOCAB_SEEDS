@@ -11,7 +11,7 @@ library(tidyverse)
 
 INFILE_NA <- "data/diversity_measures_by_age_NA.csv"
 INFILE_UK <- "data/diversity_measures_by_age_UK.csv"
-GROUPS_OUTFILE <- "data/groups_info_600_900.csv"
+GROUPS_OUTFILE <- "data/groups_info_600_900_corrected.csv"
 NDAYS_PER_YEAR <- 365.2422
 #(ages defined below)
 
@@ -143,7 +143,7 @@ delta_mtld <- target_kids %>%
           slope = mtld_diff/age_diff)
 
 # get residual of slope after controlling for age_diff and mltld at t1
-mod <- lm(slope ~ age_diff + mtld_t1, d = delta_mtld) 
+mod <- lm(slope ~ mtld_t1, d = delta_mtld) 
 
 delta_mtld_with_resids <- delta_mtld %>%
   modelr::add_residuals(mod, var = "delta_resid")
