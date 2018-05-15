@@ -225,7 +225,8 @@ trigrams &lt;-<span class="st"> </span><span class="kw">read_csv</span>(<span cl
    <span class="kw">data.frame</span>(<span class="dt">target_child_id =</span> id,
               <span class="dt">mean_dist_t1 =</span> <span class="kw">mean</span>(all_dists),
               <span class="dt">median_dist_t1 =</span> <span class="kw">median</span>(all_dists),
-              <span class="dt">var_dist_t1 =</span>  <span class="kw">ifelse</span>(<span class="kw">mean</span>(<span class="kw">var</span>(all_dists)) <span class="op">==</span><span class="st"> </span><span class="dv">0</span>, <span class="ot">NA</span>, <span class="kw">mean</span>(<span class="kw">var</span>(all_dists))),
+              <span class="dt">var_dist_t1 =</span> <span class="kw">mean</span>(<span class="kw">var</span>(all_dists)),
+              <span class="dt">cv =</span> <span class="kw">sd</span>(all_dists)<span class="op">/</span><span class="kw">mean</span>(all_dists),
               <span class="dt">n_t1 =</span> <span class="kw">nrow</span>(all_dists)) 
 }
 
@@ -240,457 +241,269 @@ vocab_measures &lt;-<span class="st"> </span><span class="kw">map2_df</span>(nes
 <span class="st">  </span><span class="kw">left_join</span>(groups_info <span class="op">%&gt;%</span><span class="st"> </span><span class="kw">select</span>(delta_resid_group, target_child_id, mtld_t1, 
                                           mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">mutate</span>(<span class="dt">log_mtld_t2 =</span> <span class="kw">log</span>(mtld_t2 <span class="op">+</span><span class="st"> </span><span class="dv">1</span>),
-         <span class="dt">log_mtld_t1 =</span> <span class="kw">log</span>(mtld_t1 <span class="op">+</span><span class="st"> </span><span class="dv">1</span>),
-         <span class="dt">log_median_dist_t1 =</span> <span class="kw">log</span>(median_dist_t1),
-         <span class="dt">log_mean_dist_t1 =</span> <span class="kw">log</span>(mean_dist_t1),
-         <span class="dt">log_var_dist_t1 =</span> <span class="kw">log</span>(var_dist_t1),
-         <span class="dt">log_n_t1 =</span> <span class="kw">log</span>(n_t1)) <span class="op">%&gt;%</span>
+         <span class="dt">log_mtld_t1 =</span> <span class="kw">log</span>(mtld_t1 <span class="op">+</span><span class="st"> </span><span class="dv">1</span>)) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">left_join</span>(trigrams <span class="op">%&gt;%</span><span class="st"> </span><span class="kw">select</span>(target_child_id, log_num_trigrams_t1, log_num_trigrams_t2,
-                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">mutate_if</span>(is.numeric, scale)</code></pre></div>
+                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2))</code></pre></div>
 </div>
 <div id="regressions" class="section level2">
 <h2>Regressions</h2>
 <div id="predicting-mtld-at-t2" class="section level3">
 <h3>Predicting MTLD at t2</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span>log_median_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1),
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = log_mtld_t2 ~ log_median_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
+## lm(formula = log_mtld_t2 ~ log(median_dist_t1) + age_t1 + age_t2 + 
+##     log_mtld_t1 + log(n_t1), data = vocab_df)
 ## 
 ## Residuals:
 ##      Min       1Q   Median       3Q      Max 
-## -1.28147 -0.40165  0.02427  0.37627  1.92425 
+## -0.51050 -0.16001  0.00967  0.14990  0.76658 
 ## 
 ## Coefficients:
 ##                      Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)        -2.002e-16  6.921e-02   0.000  1.00000    
-## log_median_dist_t1  3.581e-01  1.053e-01   3.402  0.00103 ** 
-## age_t1             -3.464e-01  1.083e-01  -3.200  0.00194 ** 
-## age_t2              9.943e-02  9.035e-02   1.101  0.27425    
-## log_mtld_t1         8.025e-01  7.894e-02  10.166  2.7e-16 ***
-## log_n_t1            2.738e-01  1.137e-01   2.408  0.01825 *  
+## (Intercept)          2.108188   1.747301   1.207  0.23100    
+## log(median_dist_t1)  0.294455   0.086561   3.402  0.00103 ** 
+## age_t1              -0.003213   0.001004  -3.200  0.00194 ** 
+## age_t2               0.001846   0.001677   1.101  0.27425    
+## log_mtld_t1          0.613698   0.060367  10.166  2.7e-16 ***
+## log(n_t1)            0.060932   0.025308   2.408  0.01825 *  
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.6565 on 84 degrees of freedom
+## Residual standard error: 0.2615 on 84 degrees of freedom
 ## Multiple R-squared:  0.5932, Adjusted R-squared:  0.569 
 ## F-statistic:  24.5 on 5 and 84 DF,  p-value: 3.941e-15</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span>log_mean_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(mean_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1),
      <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">    </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = log_mtld_t2 ~ log_mean_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
+## lm(formula = log_mtld_t2 ~ log(mean_dist_t1) + age_t1 + age_t2 + 
+##     log_mtld_t1 + log(n_t1), data = vocab_df)
 ## 
 ## Residuals:
 ##      Min       1Q   Median       3Q      Max 
-## -1.31538 -0.37129  0.01006  0.35365  1.87462 
+## -0.52401 -0.14791  0.00401  0.14088  0.74680 
 ## 
 ## Coefficients:
 ##                    Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)      -2.389e-16  6.868e-02   0.000 1.000000    
-## log_mean_dist_t1  6.022e-01  1.668e-01   3.611 0.000517 ***
-## age_t1           -2.996e-01  1.109e-01  -2.702 0.008333 ** 
-## age_t2            1.030e-01  8.970e-02   1.148 0.254211    
-## log_mtld_t1       7.983e-01  7.839e-02  10.184  2.5e-16 ***
-## log_n_t1          5.251e-01  1.594e-01   3.294 0.001448 ** 
+## (Intercept)        1.828592   1.741264   1.050 0.296660    
+## log(mean_dist_t1)  0.552162   0.152900   3.611 0.000517 ***
+## age_t1            -0.002779   0.001028  -2.702 0.008333 ** 
+## age_t2             0.001912   0.001665   1.148 0.254211    
+## log_mtld_t1        0.610479   0.059947  10.184  2.5e-16 ***
+## log(n_t1)          0.116874   0.035483   3.294 0.001448 ** 
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.6515 on 84 degrees of freedom
+## Residual standard error: 0.2596 on 84 degrees of freedom
 ## Multiple R-squared:  0.5993, Adjusted R-squared:  0.5755 
 ## F-statistic: 25.13 on 5 and 84 DF,  p-value: 2.107e-15</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span>log_var_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="cf">if</span> (MINWORDSFORVOCAB <span class="op">==</span><span class="st"> </span><span class="dv">1</span>){
+<span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(var_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1),
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = log_mtld_t2 ~ log_var_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##     Min      1Q  Median      3Q     Max 
-## -1.1134 -0.3250  0.1191  0.3211  1.6121 
-## 
-## Coefficients:
-##                 Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)     -0.09753    0.06419  -1.519   0.1330    
-## log_var_dist_t1 -0.13047    0.06354  -2.053   0.0437 *  
-## age_t1          -0.52486    0.09713  -5.404 8.04e-07 ***
-## age_t2           0.04589    0.07721   0.594   0.5541    
-## log_mtld_t1      0.86319    0.06696  12.891  &lt; 2e-16 ***
-## log_n_t1         0.22562    0.08748   2.579   0.0119 *  
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.5435 on 72 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.7132, Adjusted R-squared:  0.6933 
-## F-statistic: 35.81 on 5 and 72 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span>log_median_dist_t1<span class="op">+</span><span class="st"> </span>log_var_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1,
+<span class="st">  </span><span class="kw">summary</span>()
+
+<span class="kw">lm</span>(log_mtld_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1) <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(var_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2 <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1),
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = log_mtld_t2 ~ log_median_dist_t1 + log_var_dist_t1 + 
-##     age_t1 + age_t2 + log_mtld_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.11689 -0.35389  0.03871  0.34048  0.98794 
-## 
-## Coefficients:
-##                    Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         0.02571    0.07157   0.359 0.720453    
-## log_median_dist_t1  0.49711    0.15487   3.210 0.001995 ** 
-## log_var_dist_t1    -0.23322    0.06782  -3.439 0.000982 ***
-## age_t1             -0.43551    0.09554  -4.558  2.1e-05 ***
-## age_t2              0.04743    0.07266   0.653 0.516002    
-## log_mtld_t1         0.81387    0.06486  12.548  &lt; 2e-16 ***
-## log_n_t1            0.36088    0.09248   3.902 0.000214 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.5114 on 71 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.7496, Adjusted R-squared:  0.7284 
-## F-statistic: 35.42 on 6 and 71 DF,  p-value: &lt; 2.2e-16</code></pre>
+<span class="st">  </span><span class="kw">summary</span>()
+}</code></pre></div>
 </div>
 <div id="predicting-change-in-mtld" class="section level3">
 <h3>Predicting change in MTLD</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span>log_median_dist_t1  <span class="op">+</span><span class="st">  </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1)  <span class="op">+</span><span class="st">  </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = mtld_diff ~ log_median_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
+## lm(formula = mtld_diff ~ log(median_dist_t1) + age_t1 + age_t2 + 
+##     log_mtld_t1 + log(n_t1), data = vocab_df)
 ## 
 ## Residuals:
 ##      Min       1Q   Median       3Q      Max 
-## -2.64460 -0.32687 -0.07873  0.30634  2.54348 
+## -18.3879  -2.2728  -0.5474   2.1300  17.6848 
 ## 
 ## Coefficients:
 ##                      Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         4.519e-17  7.910e-02   0.000  1.00000    
-## log_median_dist_t1  3.362e-01  1.203e-01   2.794  0.00645 ** 
-## age_t1             -2.601e-01  1.237e-01  -2.102  0.03857 *  
-## age_t2              1.295e-02  1.033e-01   0.125  0.90052    
-## log_mtld_t1        -5.064e-01  9.022e-02  -5.613  2.5e-07 ***
-## log_n_t1            3.647e-01  1.300e-01   2.806  0.00623 ** 
+## (Intercept)         46.527227  34.854471   1.335  0.18552    
+## log(median_dist_t1)  4.824164   1.726688   2.794  0.00645 ** 
+## age_t1              -0.042101   0.020031  -2.102  0.03857 *  
+## age_t2               0.004195   0.033460   0.125  0.90052    
+## log_mtld_t1         -6.759037   1.204176  -5.613  2.5e-07 ***
+## log(n_t1)            1.416770   0.504840   2.806  0.00623 ** 
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.7504 on 84 degrees of freedom
+## Residual standard error: 5.217 on 84 degrees of freedom
 ## Multiple R-squared:  0.4686, Adjusted R-squared:  0.437 
 ## F-statistic: 14.81 on 5 and 84 DF,  p-value: 2.098e-10</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span>log_mean_dist_t1  <span class="op">+</span><span class="st">  </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(mean_dist_t1)  <span class="op">+</span><span class="st">  </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = mtld_diff ~ log_mean_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
+## lm(formula = mtld_diff ~ log(mean_dist_t1) + age_t1 + age_t2 + 
+##     log_mtld_t1 + log(n_t1), data = vocab_df)
 ## 
 ## Residuals:
-##     Min      1Q  Median      3Q     Max 
-## -2.6249 -0.3321 -0.1006  0.3529  2.5163 
+##      Min       1Q   Median       3Q      Max 
+## -18.2506  -2.3088  -0.6991   2.4536  17.4956 
 ## 
 ## Coefficients:
 ##                    Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)       8.518e-18  7.899e-02   0.000  1.00000    
-## log_mean_dist_t1  5.443e-01  1.918e-01   2.838  0.00569 ** 
-## age_t1           -2.209e-01  1.275e-01  -1.732  0.08686 .  
-## age_t2            1.573e-02  1.032e-01   0.152  0.87919    
-## log_mtld_t1      -5.098e-01  9.016e-02  -5.654  2.1e-07 ***
-## log_n_t1          5.844e-01  1.834e-01   3.187  0.00202 ** 
+## (Intercept)       42.418874  34.953036   1.214  0.22830    
+## log(mean_dist_t1)  8.709825   3.069215   2.838  0.00569 ** 
+## age_t1            -0.035765   0.020644  -1.732  0.08686 .  
+## age_t2             0.005096   0.033428   0.152  0.87919    
+## log_mtld_t1       -6.804031   1.203348  -5.654  2.1e-07 ***
+## log(n_t1)          2.270269   0.712265   3.187  0.00202 ** 
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.7494 on 84 degrees of freedom
+## Residual standard error: 5.21 on 84 degrees of freedom
 ## Multiple R-squared:   0.47,  Adjusted R-squared:  0.4385 
 ## F-statistic:  14.9 on 5 and 84 DF,  p-value: 1.882e-10</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="cf">if</span> (MINWORDSFORVOCAB <span class="op">==</span><span class="st"> </span><span class="dv">1</span>){
+<span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = mtld_diff ~ log_var_dist_t1 + age_t1 + age_t2 + 
-##     log_mtld_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -2.37187 -0.32006 -0.04821  0.29294  2.43359 
-## 
-## Coefficients:
-##                 Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)     -0.08138    0.07431  -1.095  0.27712    
-## log_var_dist_t1 -0.10328    0.07356  -1.404  0.16464    
-## age_t1          -0.48542    0.11245  -4.317 4.97e-05 ***
-## age_t2          -0.04858    0.08939  -0.543  0.58848    
-## log_mtld_t1     -0.47154    0.07753  -6.082 5.16e-08 ***
-## log_n_t1         0.33751    0.10128   3.332  0.00136 ** 
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.6292 on 72 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.5475, Adjusted R-squared:  0.516 
-## F-statistic: 17.42 on 5 and 72 DF,  p-value: 2.876e-11</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span>log_median_dist_t1  <span class="op">+</span><span class="st">  </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<span class="st">  </span><span class="kw">summary</span>()
+
+<span class="kw">lm</span>(mtld_diff <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1)  <span class="op">+</span><span class="st">  </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_mtld_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = mtld_diff ~ log_median_dist_t1 + log_var_dist_t1 + 
-##     age_t1 + age_t2 + log_mtld_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -2.31959 -0.27768 -0.04133  0.28865  1.78013 
-## 
-## Coefficients:
-##                    Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         0.04765    0.08395   0.568 0.572084    
-## log_median_dist_t1  0.52048    0.18166   2.865 0.005479 ** 
-## log_var_dist_t1    -0.21086    0.07955  -2.651 0.009902 ** 
-## age_t1             -0.39187    0.11207  -3.497 0.000817 ***
-## age_t2             -0.04697    0.08522  -0.551 0.583264    
-## log_mtld_t1        -0.52319    0.07608  -6.877 1.97e-09 ***
-## log_n_t1            0.47914    0.10848   4.417 3.51e-05 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.5999 on 71 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.5944, Adjusted R-squared:  0.5601 
-## F-statistic: 17.34 on 6 and 71 DF,  p-value: 3.081e-12</code></pre>
+<span class="st">  </span><span class="kw">summary</span>()
+}</code></pre></div>
 </div>
 <div id="predicting-number-of-trigrams-at-t2" class="section level3">
 <h3>Predicting number of trigrams at t2</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_median_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_n_t1 <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = log_num_trigrams_t2 ~ log_median_dist_t1 + age_t1 + 
-##     age_t2 + log_n_t1 + log_num_trigrams_t1, data = vocab_df)
+## lm(formula = log_num_trigrams_t2 ~ log(median_dist_t1) + age_t1 + 
+##     age_t2 + log(n_t1) + log_num_trigrams_t1, data = vocab_df)
 ## 
 ## Residuals:
 ##     Min      1Q  Median      3Q     Max 
-## -1.2068 -0.2661 -0.0222  0.2195  1.4840 
-## 
-## Coefficients:
-##                       Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         -1.905e-16  4.963e-02   0.000 1.000000    
-## log_median_dist_t1   2.065e-01  7.549e-02   2.736 0.007594 ** 
-## age_t1              -1.560e-01  7.589e-02  -2.055 0.042939 *  
-## age_t2               1.569e-01  6.476e-02   2.423 0.017543 *  
-## log_n_t1             5.262e-01  1.354e-01   3.886 0.000202 ***
-## log_num_trigrams_t1  6.891e-01  1.332e-01   5.174 1.54e-06 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.4708 on 84 degrees of freedom
-## Multiple R-squared:  0.7908, Adjusted R-squared:  0.7783 
-## F-statistic:  63.5 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_mean_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_n_t1 <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1,
-   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = log_num_trigrams_t2 ~ log_mean_dist_t1 + age_t1 + 
-##     age_t2 + log_n_t1 + log_num_trigrams_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.27610 -0.25718 -0.01588  0.23621  1.51041 
-## 
-## Coefficients:
-##                       Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         -2.146e-16  4.942e-02   0.000  1.00000    
-## log_mean_dist_t1     3.441e-01  1.198e-01   2.872  0.00516 ** 
-## age_t1              -1.292e-01  7.797e-02  -1.656  0.10136    
-## age_t2               1.588e-01  6.452e-02   2.462  0.01587 *  
-## log_n_t1             6.773e-01  1.575e-01   4.301 4.57e-05 ***
-## log_num_trigrams_t1  6.784e-01  1.325e-01   5.119 1.92e-06 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.4689 on 84 degrees of freedom
-## Multiple R-squared:  0.7925, Adjusted R-squared:  0.7802 
-## F-statistic: 64.17 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
-   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = log_num_trigrams_t2 ~ log_var_dist_t1 + age_t1 + 
-##     age_t2 + log_num_trigrams_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.10949 -0.23278 -0.01548  0.18671  1.30409 
-## 
-## Coefficients:
-##                     Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         -0.06777    0.05436  -1.247   0.2166    
-## log_var_dist_t1     -0.10714    0.05309  -2.018   0.0473 *  
-## age_t1              -0.10729    0.07982  -1.344   0.1831    
-## age_t2               0.14153    0.06484   2.183   0.0323 *  
-## log_num_trigrams_t1  0.78474    0.15680   5.005 3.83e-06 ***
-## log_n_t1             0.35367    0.14289   2.475   0.0157 *  
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.4559 on 72 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.7766, Adjusted R-squared:  0.7611 
-## F-statistic: 50.06 on 5 and 72 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_mean_dist_t1  <span class="op">+</span><span class="st">  </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
-   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = log_num_trigrams_t2 ~ log_mean_dist_t1 + log_var_dist_t1 + 
-##     age_t1 + age_t2 + log_num_trigrams_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.14654 -0.26724 -0.03388  0.15642  1.44963 
+## -1.9517 -0.4304 -0.0359  0.3550  2.4000 
 ## 
 ## Coefficients:
 ##                      Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)         -0.006587   0.059983  -0.110  0.91286    
-## log_mean_dist_t1     0.404762   0.185794   2.179  0.03269 *  
-## log_var_dist_t1     -0.125612   0.052449  -2.395  0.01926 *  
-## age_t1              -0.039452   0.083824  -0.471  0.63933    
-## age_t2               0.142021   0.063214   2.247  0.02777 *  
-## log_num_trigrams_t1  0.711600   0.156517   4.546 2.19e-05 ***
-## log_n_t1             0.644929   0.193087   3.340  0.00134 ** 
+## (Intercept)          0.838487   5.076454   0.165 0.869206    
+## log(median_dist_t1)  0.689343   0.251985   2.736 0.007594 ** 
+## age_t1              -0.005874   0.002858  -2.055 0.042939 *  
+## age_t2               0.011827   0.004881   2.423 0.017543 *  
+## log(n_t1)            0.475416   0.122330   3.886 0.000202 ***
+## log_num_trigrams_t1  0.399276   0.077171   5.174 1.54e-06 ***
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.4445 on 71 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.7906, Adjusted R-squared:  0.7729 
-## F-statistic: 44.68 on 6 and 71 DF,  p-value: &lt; 2.2e-16</code></pre>
+## Residual standard error: 0.7614 on 84 degrees of freedom
+## Multiple R-squared:  0.7908, Adjusted R-squared:  0.7783 
+## F-statistic:  63.5 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(mean_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1,
+   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
+<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
+<pre><code>## 
+## Call:
+## lm(formula = log_num_trigrams_t2 ~ log(mean_dist_t1) + age_t1 + 
+##     age_t2 + log(n_t1) + log_num_trigrams_t1, data = vocab_df)
+## 
+## Residuals:
+##      Min       1Q   Median       3Q      Max 
+## -2.06378 -0.41592 -0.02569  0.38202  2.44273 
+## 
+## Coefficients:
+##                      Estimate Std. Error t value Pr(&gt;|t|)    
+## (Intercept)          0.203437   5.075622   0.040  0.96812    
+## log(mean_dist_t1)    1.280761   0.445957   2.872  0.00516 ** 
+## age_t1              -0.004863   0.002936  -1.656  0.10136    
+## age_t2               0.011971   0.004863   2.462  0.01587 *  
+## log(n_t1)            0.611996   0.142303   4.301 4.57e-05 ***
+## log_num_trigrams_t1  0.393044   0.076782   5.119 1.92e-06 ***
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## Residual standard error: 0.7583 on 84 degrees of freedom
+## Multiple R-squared:  0.7925, Adjusted R-squared:  0.7802 
+## F-statistic: 64.17 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="cf">if</span> (MINWORDSFORVOCAB <span class="op">==</span><span class="st"> </span><span class="dv">1</span>){
+<span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
+   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
+<span class="st">  </span><span class="kw">summary</span>()
+
+<span class="kw">lm</span>(log_num_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(mean_dist_t1)  <span class="op">+</span><span class="st">  </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_num_trigrams_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
+   <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
+<span class="st">  </span><span class="kw">summary</span>()
+}</code></pre></div>
 </div>
 <div id="predicting-frequency-of-trigrams-at-t2" class="section level3">
 <h3>Predicting frequency of trigrams at t2</h3>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_median_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_n_t1 <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = mean_log_freq_trigrams_t2 ~ log_median_dist_t1 + 
-##     age_t1 + age_t2 + log_n_t1 + mean_log_freq_trigrams_t1, data = vocab_df)
+## lm(formula = mean_log_freq_trigrams_t2 ~ log(median_dist_t1) + 
+##     age_t1 + age_t2 + log(n_t1) + mean_log_freq_trigrams_t1, 
+##     data = vocab_df)
 ## 
 ## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.04813 -0.24661 -0.02453  0.23372  1.13363 
+##       Min        1Q    Median        3Q       Max 
+## -0.180695 -0.042515 -0.004228  0.040293  0.195435 
 ## 
 ## Coefficients:
 ##                             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)               -1.831e-16  4.512e-02   0.000  1.00000    
-## log_median_dist_t1        -2.276e-01  6.857e-02  -3.318  0.00134 ** 
-## age_t1                     5.656e-02  6.835e-02   0.828  0.41029    
-## age_t2                    -7.765e-02  5.895e-02  -1.317  0.19132    
-## log_n_t1                  -8.079e-01  9.160e-02  -8.821 1.36e-13 ***
-## mean_log_freq_trigrams_t1  3.773e-01  7.743e-02   4.873 5.12e-06 ***
+## (Intercept)                0.9866237  0.5045751   1.955  0.05387 .  
+## log(median_dist_t1)       -0.0809648  0.0243980  -3.318  0.00134 ** 
+## age_t1                     0.0002270  0.0002743   0.828  0.41029    
+## age_t2                    -0.0006239  0.0004736  -1.317  0.19132    
+## log(n_t1)                 -0.0778168  0.0088221  -8.821 1.36e-13 ***
+## mean_log_freq_trigrams_t1  0.2403127  0.0493137   4.873 5.12e-06 ***
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.4281 on 84 degrees of freedom
+## Residual standard error: 0.0738 on 84 degrees of freedom
 ## Multiple R-squared:  0.8271, Adjusted R-squared:  0.8168 
 ## F-statistic: 80.34 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_mean_dist_t1 <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>log_n_t1 <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(mean_dist_t1) <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## 
 ## Call:
-## lm(formula = mean_log_freq_trigrams_t2 ~ log_mean_dist_t1 + age_t1 + 
-##     age_t2 + log_n_t1 + mean_log_freq_trigrams_t1, data = vocab_df)
+## lm(formula = mean_log_freq_trigrams_t2 ~ log(mean_dist_t1) + 
+##     age_t1 + age_t2 + log(n_t1) + mean_log_freq_trigrams_t1, 
+##     data = vocab_df)
 ## 
 ## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -1.07987 -0.24162  0.00621  0.25563  1.04165 
+##       Min        1Q    Median        3Q       Max 
+## -0.186167 -0.041654  0.001071  0.044069  0.179577 
 ## 
 ## Coefficients:
 ##                             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)               -1.558e-16  4.500e-02   0.000  1.00000    
-## log_mean_dist_t1          -3.715e-01  1.093e-01  -3.398  0.00104 ** 
-## age_t1                     2.683e-02  7.063e-02   0.380  0.70501    
-## age_t2                    -8.024e-02  5.881e-02  -1.364  0.17613    
-## log_n_t1                  -9.727e-01  1.202e-01  -8.094 3.92e-12 ***
-## mean_log_freq_trigrams_t1  3.576e-01  7.740e-02   4.621 1.37e-05 ***
+## (Intercept)                1.0845476  0.5060906   2.143  0.03501 *  
+## log(mean_dist_t1)         -0.1474092  0.0433782  -3.398  0.00104 ** 
+## age_t1                     0.0001077  0.0002835   0.380  0.70501    
+## age_t2                    -0.0006446  0.0004725  -1.364  0.17613    
+## log(n_t1)                 -0.0936851  0.0115740  -8.094 3.92e-12 ***
+## mean_log_freq_trigrams_t1  0.2277596  0.0492914   4.621 1.37e-05 ***
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ## 
-## Residual standard error: 0.4269 on 84 degrees of freedom
+## Residual standard error: 0.07359 on 84 degrees of freedom
 ## Multiple R-squared:  0.828,  Adjusted R-squared:  0.8178 
 ## F-statistic: 80.89 on 5 and 84 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="cf">if</span> (MINWORDSFORVOCAB <span class="op">==</span><span class="st"> </span><span class="dv">1</span>){
+<span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = mean_log_freq_trigrams_t2 ~ log_var_dist_t1 + age_t1 + 
-##     age_t2 + mean_log_freq_trigrams_t1 + log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##     Min      1Q  Median      3Q     Max 
-## -0.9163 -0.2312 -0.0329  0.2621  0.8651 
-## 
-## Coefficients:
-##                            Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)                0.082883   0.046007   1.802   0.0758 .  
-## log_var_dist_t1            0.076645   0.045694   1.677   0.0978 .  
-## age_t1                    -0.003519   0.067853  -0.052   0.9588    
-## age_t2                    -0.075266   0.055355  -1.360   0.1782    
-## mean_log_freq_trigrams_t1  0.618268   0.111355   5.552 4.45e-07 ***
-## log_n_t1                  -0.534587   0.102774  -5.202 1.78e-06 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.3894 on 72 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.8459, Adjusted R-squared:  0.8352 
-## F-statistic: 79.02 on 5 and 72 DF,  p-value: &lt; 2.2e-16</code></pre>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span>log_median_dist_t1  <span class="op">+</span><span class="st">  </span>log_var_dist_t1  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1 <span class="op">+</span><span class="st"> </span>log_n_t1 ,
+<span class="st">  </span><span class="kw">summary</span>()
+
+<span class="kw">lm</span>(mean_log_freq_trigrams_t2 <span class="op">~</span><span class="st"> </span><span class="kw">log</span>(median_dist_t1)  <span class="op">+</span><span class="st">  </span><span class="kw">log</span>(var_dist_t1)  <span class="op">+</span><span class="st"> </span>age_t1 <span class="op">+</span><span class="st"> </span>age_t2  <span class="op">+</span><span class="st"> </span>mean_log_freq_trigrams_t1 <span class="op">+</span><span class="st"> </span><span class="kw">log</span>(n_t1) ,
    <span class="dt">data =</span> vocab_df) <span class="op">%&gt;%</span>
-<span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
-<pre><code>## 
-## Call:
-## lm(formula = mean_log_freq_trigrams_t2 ~ log_median_dist_t1 + 
-##     log_var_dist_t1 + age_t1 + age_t2 + mean_log_freq_trigrams_t1 + 
-##     log_n_t1, data = vocab_df)
-## 
-## Residuals:
-##      Min       1Q   Median       3Q      Max 
-## -0.95111 -0.15412  0.01941  0.25468  0.85431 
-## 
-## Coefficients:
-##                             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)               -0.0008849  0.0506540  -0.017  0.98611    
-## log_median_dist_t1        -0.3444604  0.1079156  -3.192  0.00211 ** 
-## log_var_dist_t1            0.1512095  0.0489626   3.088  0.00287 ** 
-## age_t1                    -0.0535003  0.0657891  -0.813  0.41882    
-## age_t2                    -0.0755962  0.0521291  -1.450  0.15141    
-## mean_log_freq_trigrams_t1  0.6097192  0.1048987   5.812 1.61e-07 ***
-## log_n_t1                  -0.6332007  0.1015949  -6.233 2.90e-08 ***
-## ---
-## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
-## 
-## Residual standard error: 0.3667 on 71 degrees of freedom
-##   (12 observations deleted due to missingness)
-## Multiple R-squared:  0.8652, Adjusted R-squared:  0.8538 
-## F-statistic: 75.95 on 6 and 71 DF,  p-value: &lt; 2.2e-16</code></pre>
+<span class="st">  </span><span class="kw">summary</span>()
+}</code></pre></div>
 </div>
 </div>
 
