@@ -1,5 +1,5 @@
 ---
-title: Semantic space by kid analyses
+title: Semantic space by-kid analyses
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -21,151 +21,167 @@ library(tidyverse)
 library(langcog)
 library(data.table)
 library(feather)
-library(broom)
 
 theme_set(theme_classic(base_size = 10))
 ```
 
+*QUESTION*: Do the distance properties of a kids vocab at t1 predict vocabulary outcomes at t2?
 
-Join all variables
+For each kids vocab, getting coordinates of each word in semantic space using fasttext english wikipedia model. The predictors are the mean, median, var distance between words for each kid.
+
+Vocabulary outcome measures: mtld at t2, mtld change, number of trigrams at t2 and frequency of trigrams at t1
+
+In previous versions of this analysis I transformed the 300-D wikipedia model into tsne coordinates for the words in all kids' vocabs. This analysis suggested an effect whereby vocabs with larger mean distance at t1 predicted mtld at t2. However, the tsne coordinates were probabilistic (changed with each run of the model), and thus these results were not consistent.
+
+So, here I'm doing distance calculations using cosine on the full 300-D space. The effects depend on the cuttoff for counting a kid as knowing a word, with larger effects for bigger cuttoffs. 
+
+Broadly, the pattern of findings is that vocabularies with high distance and low variability have high mtld at t2. This is also true for number of trigrams. For trigram frequency, the opposite is true: low distance high variability predicts more frequent trigrams at t2.
+
+```{r, params}
+MINWORDSFORVOCAB <- 5
+```
+
+The min words for vocab here is `r MINWORDSFORVOCAB`.
+
+## Get df with all measures
+Read in data
 ```{r}
-vocab_measures <- read_csv("semantic_space_measures.csv")
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+fasttext_model <- read_feather("fast_text_childes_words_600_900.feather")
 groups_info <- read_csv("../1_mtld_measure/data/groups_info_600_900_corrected.csv")
-trigrams <- read_csv("../2_trigrams/mtld_continuous_trigram_by_kid_MIN1.csv") %>%
-  select(target_child_id, vocab_t1, vocab_delta,
-         mean_log_word_freq_t1, log_num_trigrams_t1,
-         mean_log_word_freq_t2, log_num_trigrams_t2) %>%
-  rename(n_t1_trigrams = vocab_t1)
+trigrams <- read_csv("../2_trigrams/mtld_continuous_trigram_by_kid_MIN1.csv")
+```
 
+Get filtered version of types for each kid
+```{r}
+types_clean <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB)
+```
+
+Get vocab measures by kids
+```{r}
+get_vocab_measure_by_kid <- function(id, data, model){
+  this_kids_model <- model %>%
+    filter(target_word %in% data$gloss_clean)
+ 
+   # get pairwise distances
+   all_dists = coop::cosine(t(this_kids_model[,-1]))
+  
+   data.frame(target_child_id = id,
+              mean_dist_t1 = mean(all_dists),
+              median_dist_t1 = median(all_dists),
+              var_dist_t1 = mean(var(all_dists)),
+              cv = sd(all_dists)/mean(all_dists),
+              n_t1 = nrow(all_dists)) 
+}
+
+nested_data_by_kid <- nest(types_clean, -target_child_id)
+
+vocab_measures <- map2_df(nested_data_by_kid$target_child_id, 
+                          nested_data_by_kid$data, 
+                          get_vocab_measure_by_kid, 
+                          fasttext_model)
+```
+
+Merge in other variables
+```{r}
 vocab_df <- vocab_measures %>%
-  left_join(groups_info %>% dplyr::select(delta_resid_group, target_child_id, mtld_t1, 
-                                        mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) %>%
-  left_join(trigrams) %>%
+  left_join(groups_info %>% select(delta_resid_group, target_child_id, mtld_t1, 
+                                          mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) %>%
   mutate(log_mtld_t2 = log(mtld_t2 + 1),
-         log_mtld_t1 = log(mtld_t1 + 1),
-         cv = (sqrt(var_dist_t1))/mean_density_t1,
-         normal_density = log(mean_density_t1)/log(n_t1_in_vocab_measures)) 
+         log_mtld_t1 = log(mtld_t1 + 1)) %>%
+  left_join(trigrams %>% select(target_child_id, log_num_trigrams_t1, log_num_trigrams_t2,
+                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2))
 ```
-   
+
 ## Regressions
-### MTLD T2
-```{r}
-lm(log_mtld_t2 ~ log(mean_density_t1) + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mtld_t2 ~ cv + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mtld_t2 ~ max_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mtld_t2 ~  normal_density  + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mtld_t2 ~ var_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures) , 
-   data = vocab_df) %>%
-  summary()
-```
+### Predicting MTLD at t2
 
 ```{r}
-## this is the model
-lm(log_mtld_t2 ~ mean_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(n_t1_in_vocab_measures),
+lm(log_mtld_t2 ~ log(median_dist_t1) + age_t1 + age_t2 + log_mtld_t1 + log(n_t1),
    data = vocab_df) %>%
   summary()
 
-## simplified version
-lm(log_mtld_t2 ~ mean_dist_t1 + age_t1 + log_mtld_t1 ,
+lm(log_mtld_t2 ~ log(mean_dist_t1) + age_t1 + age_t2 + log_mtld_t1 + log(n_t1),
+     data = vocab_df) %>%
+    summary()
+
+if (MINWORDSFORVOCAB == 1){
+lm(log_mtld_t2 ~ log(var_dist_t1) + age_t1 + age_t2 + log_mtld_t1 + log(n_t1),
    data = vocab_df) %>%
   summary()
 
-lm(log_mtld_t2 ~ age_t1 + log_mtld_t1 ,
+lm(log_mtld_t2 ~ log(median_dist_t1) + log(var_dist_t1) + age_t1 + age_t2 + log_mtld_t1 + log(n_t1),
    data = vocab_df) %>%
   summary()
-
-lm(log_mtld_t2 ~ mean_dist_t1  * log_mtld_t1  + age_t1 + log(n_t1), 
-   data = vocab_df %>% filter(mtld_t1_group == "low_mtld_t1" & age_t1_group == "low_age_t1")) %>%
-  summary()
+}
 ```
 
-### PLOTTING
-
-# plot vocab at t1, ordered by mean dist at time 1, colored by log_mtld_t2
-
-pdf("high_mtld_t1_points.pdf", width = 14, height = 2)
-types_filtered_complete_with_group %>%
-  left_join(groups_info %>% select(target_child_id, mtld_t2, age_t1, mtld_t1, mtld_diff)) %>%
-  left_join(vocab_measures %>% select(target_child_id, mean_dist_t1)) %>%
-  mutate(log_mtld_t2 = log(mtld_t2),
-         log_mtld_t1 = log(mtld_t1)) %>%
-  mutate(mtld_t1_group = ifelse(log_mtld_t1 < median(vocab_df$log_mtld_t1), "low_mtld_t1", "high_mtld_t1")) %>%
-  mutate(age_t1_group = ifelse(age_t1 < median(vocab_df$age_t1), "low_age_t1", "high_age_t1")) %>%
-  filter(tbin == "t1",
-         mtld_t1_group == "high_mtld_t1") %>%
-  ggplot(aes(x = tsne_X, y = tsne_Y, color = log_mtld_t2)) +
-  scale_color_continuous(low = "white", high = "red") +
-  #facet_wrap(~reorder(target_child_id, mean_dist_t1), ncol = 15) +
-  facet_grid(age_t1_group ~ reorder(target_child_id, mean_dist_t1)  ) +
-  #geom_density2d() +
-  geom_point(size = .2) +
-  #geom_text(aes(label = gloss_clean), size = 1.5) +
-  theme_void()  +
- theme(legend.position = "none")
-dev.off()
-
+### Predicting change in MTLD
 
 ```{r}
-### TRIGRAM ANALYSES
-lm(log_num_trigrams ~ mean_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
+lm(mtld_diff ~ log(median_dist_t1)  +  age_t1 + age_t2  + log_mtld_t1 + log(n_t1) ,
    data = vocab_df) %>%
   summary()
 
-lm(log_num_trigrams ~ mean_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(total_vocab_size) , 
+lm(mtld_diff ~ log(mean_dist_t1)  +  age_t1 + age_t2  + log_mtld_t1 + log(n_t1) ,
    data = vocab_df) %>%
   summary()
 
-lm(log_num_trigrams ~ mean_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log(total_vocab_size) , 
+if (MINWORDSFORVOCAB == 1){
+lm(mtld_diff ~ log(var_dist_t1)  + age_t1 + age_t2  + log_mtld_t1 + log(n_t1) ,
    data = vocab_df) %>%
   summary()
 
-
-lm(log_num_trigrams ~ var_dist_t1+ age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
+lm(mtld_diff ~ log(median_dist_t1)  +  log(var_dist_t1)  + age_t1 + age_t2  + log_mtld_t1 + log(n_t1) ,
    data = vocab_df) %>%
   summary()
-
-lm(log_num_trigrams ~ normal_density+ age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_num_trigrams ~ cv + age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mean_trigram_frequency ~ mean_dist_t1+ age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mean_trigram_frequency ~ var_dist_t1+ age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
-
-lm(log_mean_trigram_frequency ~ normal_density+ age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
-
-
-lm(log_mean_trigram_frequency ~ cv + age_t1 + age_t2 + log_mtld_t1 + log(n_t1) , 
-   data = vocab_df) %>%
-  summary()
+}
 ```
 
+### Predicting number of trigrams at t2
+```{r}
+lm(log_num_trigrams_t2 ~ log(median_dist_t1) + age_t1 + age_t2  + log(n_t1) + log_num_trigrams_t1,
+   data = vocab_df) %>%
+  summary()
 
+lm(log_num_trigrams_t2 ~ log(mean_dist_t1) + age_t1 + age_t2  + log(n_t1) + log_num_trigrams_t1,
+   data = vocab_df) %>%
+  summary()
 
+if (MINWORDSFORVOCAB == 1){
+lm(log_num_trigrams_t2 ~ log(var_dist_t1)  + age_t1 + age_t2  + log_num_trigrams_t1 + log(n_t1) ,
+   data = vocab_df) %>%
+  summary()
 
+lm(log_num_trigrams_t2 ~ log(mean_dist_t1)  +  log(var_dist_t1)  + age_t1 + age_t2  + log_num_trigrams_t1 + log(n_t1) ,
+   data = vocab_df) %>%
+  summary()
+}
+```
 
+### Predicting frequency of trigrams at t2
 
+```{r}
+lm(mean_log_freq_trigrams_t2 ~ log(median_dist_t1) + age_t1 + age_t2  + log(n_t1) + mean_log_freq_trigrams_t1,
+   data = vocab_df) %>%
+  summary()
 
+lm(mean_log_freq_trigrams_t2 ~ log(mean_dist_t1) + age_t1 + age_t2  + log(n_t1) + mean_log_freq_trigrams_t1,
+   data = vocab_df) %>%
+  summary()
 
+if (MINWORDSFORVOCAB == 1){
+lm(mean_log_freq_trigrams_t2 ~ log(var_dist_t1)  + age_t1 + age_t2  + mean_log_freq_trigrams_t1 + log(n_t1) ,
+   data = vocab_df) %>%
+  summary()
+
+lm(mean_log_freq_trigrams_t2 ~ log(median_dist_t1)  +  log(var_dist_t1)  + age_t1 + age_t2  + mean_log_freq_trigrams_t1 + log(n_t1) ,
+   data = vocab_df) %>%
+  summary()
+}
+```
