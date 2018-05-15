@@ -40,6 +40,8 @@ tsne_dims <- tsne_out$Y %>%
   rename(tsne_X = V1,
          tsne_Y = V2)   %>%
   bind_cols(word = model_filtered[,1])
+tsne_dims <- read_csv("tsne_dims.csv")
+
 
 word_coordinates <-  target_words %>%
   left_join(tsne_dims, by = c("gloss_clean" = "target_word"))
@@ -48,8 +50,8 @@ word_coordinates <-  target_words %>%
 MINWORDSFORVOCAB <- 1
 
 types_filtered_complete_with_group  <- types_clean %>% 
-  left_join(word_coordinates) %>% 
   filter(count >= MINWORDSFORVOCAB) %>%
+  left_join(word_coordinates) %>% 
   filter(!is.na(tsne_X)) 
 
 # get space measures by kid
