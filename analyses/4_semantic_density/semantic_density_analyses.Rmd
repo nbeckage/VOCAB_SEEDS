@@ -105,8 +105,10 @@ vocab_df <- vocab_measures %>%
          log_semantic_density = log(semantic_density),
          log_centrality = log(centrality)) %>%
   left_join(trigrams %>% select(target_child_id, log_num_trigrams_t1, log_num_trigrams_t2,
-                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) %>%
-  mutate_if(is.numeric, scale) # scale everything for regressions 
+                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) 
+  #mutate_if(is.numeric, scale) # scale everything for regressions 
+
+write_csv(vocab_df, "semantic_density_df.csv")
 ```
 
 ## Regressions
@@ -143,6 +145,10 @@ lm(mtld_diff ~ log_centrality  + age_t1 + age_t2  + log_mtld_t1 + log_word_in_no
 
 ```{r}
 lm(log_num_trigrams_t2 ~ log_semantic_density + age_t1 + age_t2  + log_word_in_norms_t1 + log_num_trigrams_t1 + mean_log_word_freq_t1,
+   data = vocab_df) %>%
+  summary()
+
+lm(log_num_trigrams_t2 ~ log_semantic_density + age_diff  + log_word_in_norms_t1 + log_num_trigrams_t1 + mean_log_word_freq_t1,
    data = vocab_df) %>%
   summary()
 
