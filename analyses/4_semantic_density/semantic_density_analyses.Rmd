@@ -52,12 +52,20 @@ density_norms <-read_csv(RCurl::getURL("https://raw.githubusercontent.com/billdt
 
 Get filtered version of types for each kid
 ```{r}
-types_clean <- all_types %>%
+nested_data_by_kid_t1 <- all_types %>%
   filter(tbin == "t1") %>%
   mutate(gloss_clean = tolower(gloss))   %>%
   group_by(target_child_id, gloss_clean) %>%
   summarize(count = sum(count)) %>%
-  filter(count >= MINWORDSFORVOCAB)
+  filter(count >= MINWORDSFORVOCAB)  %>%
+  nest(-target_child_id)
+
+nested_data_by_kid_t2 <- all_types %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB) %>%
+  nest(-target_child_id)
 ```
 
 Get mean density at t1
@@ -77,20 +85,44 @@ get_density_by_kid <- function(id, data, density_norms, freq_norms){
   this_kids_model %>%
       summarize_all(mean) %>%
       mutate(target_child_id = id, 
-             words_in_norms_t1 = nrow(this_kids_model),
-             total_words_t1 = total_words_t1,
-             mean_log_word_freq_t1 = this_kids_freq$mean_log_freq) %>%
+             words_in_norms = nrow(this_kids_model),
+             total_words = total_words_t1,
+             mean_log_word_freq = this_kids_freq$mean_log_freq) %>%
       select(target_child_id, everything())
 
 }
 
-nested_data_by_kid <- nest(types_clean, -target_child_id)
-
-vocab_measures <- map2_df(nested_data_by_kid$target_child_id, 
-                          nested_data_by_kid$data, 
+# t1 vocab measures
+vocab_measures_t1 <- map2_df(nested_data_by_kid_t1$target_child_id, 
+                          nested_data_by_kid_t1$data, 
                           get_density_by_kid, 
                           density_norms, 
-                          freq) 
+                          freq)  %>%
+         rename(words_in_norms_t1 = words_in_norms,
+             total_words_t1 = total_words, 
+             mean_log_word_freq_t1 = mean_log_word_freq) %>%
+        mutate(log_density_t1 = log(semantic_density),
+               log_centrality_t1 = log(centrality),
+               log_total_words_t1 = log(total_words_t1),
+               log_word_in_norms_t1 = log(words_in_norms_t1)) %>%
+      select(-centrality, -neighb_count, -neighb_conc, -semantic_density)
+
+# t2 vocab measures
+vocab_measures_t2 <- map2_df(nested_data_by_kid_t2$target_child_id, 
+                          nested_data_by_kid_t2$data, 
+                          get_density_by_kid, 
+                          density_norms, 
+                          freq)  %>%
+        rename(words_in_norms_t2 = words_in_norms,
+               total_words_t2 = total_words, 
+               mean_log_word_freq_t2 = mean_log_word_freq) %>%
+        mutate(log_density_t2 = log(semantic_density),
+               log_centrality_t2 = log(centrality),
+              log_total_words_t2 = log(total_words_t2),
+              log_word_in_norms_t2 = log(words_in_norms_t2))  %>%
+         select(-centrality, -neighb_count, -neighb_conc, -semantic_density)
+
+vocab_measures <- full_join(vocab_measures_t1, vocab_measures_t2)
 ```
 
 Merge in other variables
@@ -99,13 +131,10 @@ vocab_df <- vocab_measures %>%
   left_join(groups_info %>% select(delta_resid_group, target_child_id, mtld_t1, 
                                           mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) %>%
   mutate(log_mtld_t2 = log(mtld_t2 + 1),
-         log_mtld_t1 = log(mtld_t1 + 1),
-         log_total_words_t1 = log(total_words_t1),
-         log_word_in_norms_t1 = log(words_in_norms_t1),
-         log_semantic_density = log(semantic_density),
-         log_centrality = log(centrality)) %>%
+         log_mtld_t1 = log(mtld_t1 + 1)) %>%
   left_join(trigrams %>% select(target_child_id, log_num_trigrams_t1, log_num_trigrams_t2,
-                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) 
+                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) %>%
+  select(-mtld_t1, -mtld_t2)
   #mutate_if(is.numeric, scale) # scale everything for regressions 
 
 write_csv(vocab_df, "semantic_density_df.csv")
@@ -116,43 +145,53 @@ write_csv(vocab_df, "semantic_density_df.csv")
 ### Predicting log_mtld_t2
 
 ```{r}
-lm(log_mtld_t2 ~ log_semantic_density + age_t1 + age_t2 + log_mtld_t1 + log_word_in_norms_t1,
+lm(log_mtld_t2 ~  log_density_t1 + log_mtld_t1 + age_diff + age_t1, 
    data = vocab_df) %>%
   summary()
 
-lm(log_mtld_t2 ~ log_centrality + age_t1 + age_t2 + log_mtld_t1 + log_word_in_norms_t1,
+lm(log_mtld_t2 ~  log_centrality_t1 + log_mtld_t1 + age_diff + age_t1, 
    data = vocab_df) %>%
   summary()
 
+lm(log_mtld_t2 ~  log_density_t1 + log_centrality_t1 + log_mtld_t1 + age_diff + age_t1, 
+   data = vocab_df) %>%
+  summary()
 
 ```
 
 
 ### Predicting mtld_diff
 ```{r}
-
-lm(mtld_diff ~ log_semantic_density  +  age_t1 + age_t2  + log_mtld_t1 + log_word_in_norms_t1 ,
+lm(mtld_diff ~ log_density_t1  +  age_diff + age_t1 + log_mtld_t1 ,
    data = vocab_df) %>%
   summary()
 
-lm(mtld_diff ~ log_centrality  + age_t1 + age_t2  + log_mtld_t1 + log_word_in_norms_t1 ,
+lm(mtld_diff ~ log_centrality_t1  +  age_diff + age_t1 + 
+     log_mtld_t1  ,
    data = vocab_df) %>%
   summary()
 
+lm(mtld_diff ~ log_density_t1  +  log_centrality_t1 + age_diff + 
+     age_t1 + log_mtld_t1 + log_density_t2 + log_centrality_t2 + log_total_words_t1 + log_total_words_t2,
+   data = vocab_df) %>%
+  summary()
 ```
 
 ### Predicting num trigrams
-
 ```{r}
-lm(log_num_trigrams_t2 ~ log_semantic_density + age_t1 + age_t2  + log_word_in_norms_t1 + log_num_trigrams_t1 + mean_log_word_freq_t1,
+lm(log_num_trigrams_t2 ~ log_density_t1 +  log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_density_t2,
    data = vocab_df) %>%
   summary()
 
-lm(log_num_trigrams_t2 ~ log_semantic_density + age_diff  + log_word_in_norms_t1 + log_num_trigrams_t1 + mean_log_word_freq_t1,
+lm(log_num_trigrams_t2 ~ log_centrality_t1 +  log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_centrality_t2,
    data = vocab_df) %>%
   summary()
 
-lm(log_num_trigrams_t2 ~ log_centrality + age_t1 + age_t2  + log_word_in_norms_t1 + log_num_trigrams_t1 + mean_log_word_freq_t1,
+lm(log_num_trigrams_t2 ~ log_centrality_t1 + log_centrality_t2 + log_density_t1 + log_density_t2 + log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_centrality_t2,
+   data = vocab_df) %>%
+  summary()
+
+lm(log_num_trigrams_t2 ~ log_centrality_t1 +  log_density_t1 + log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_mtld_t1 + log_mtld_t2,
    data = vocab_df) %>%
   summary()
 ```
@@ -160,11 +199,59 @@ lm(log_num_trigrams_t2 ~ log_centrality + age_t1 + age_t2  + log_word_in_norms_t
 ### Predicting freq trigrams
 
 ```{r}
-lm(mean_log_freq_trigrams_t2 ~ log_semantic_density + age_t1 + age_t2  + log_word_in_norms_t1 + mean_log_freq_trigrams_t1 + mean_log_word_freq_t1,
+lm(mean_log_freq_trigrams_t2 ~ log_density_t1 +  log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_density_t2,
    data = vocab_df) %>%
   summary()
 
-lm(mean_log_freq_trigrams_t2 ~ log_centrality + age_t1 + age_t2  + log_word_in_norms_t1 + mean_log_freq_trigrams_t1 + mean_log_word_freq_t1,
+
+lm(mean_log_freq_trigrams_t2 ~ log_centrality_t1 +  log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_centrality_t2,
    data = vocab_df) %>%
   summary()
+
+lm(mean_log_freq_trigrams_t2 ~ log_centrality_t1 +  log_num_trigrams_t1 + age_diff + age_t1 +  log_word_in_norms_t1 + log_word_in_norms_t2 +  mean_log_word_freq_t1 + mean_log_word_freq_t2 + log_centrality_t2,
+   data = vocab_df) %>%
+  summary()
+```
+```
+
+
+## Exploring individual words
+```{r}
+types_clean <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB)
+ 
+word_by_decile <- types_clean %>%
+  ungroup()%>%
+  count(gloss_clean) %>%
+  filter(n >= 5) %>%
+  left_join(density_norms, by = c("gloss_clean" = "word")) %>%
+  filter(!is.na(centrality)) %>%
+  mutate(decile_centrality = ntile(centrality, 10),
+         decile_density = ntile(semantic_density, 10)) 
+
+word_by_decile_diff = word_by_decile  %>% 
+  #filter(decile_centrality != decile_density) %>%
+  mutate(decile_diff = decile_centrality - decile_density,
+         abs_decile_diff = abs(decile_diff)) %>%
+  #filter(abs_decile_diff > 4) %>%
+  select(-2:-6) %>%
+  arrange(-abs_decile_diff)
+
+DT::datatable(word_by_decile_diff)
+```
+
+## Centrality at t1 vs. t2
+```{r}
+ggplot(vocab_measures, aes(x = log_centrality_t1, y = log_centrality_t2)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+ggplot(vocab_measures, aes(x = log_density_t1, y = log_density_t2)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+  
 ```

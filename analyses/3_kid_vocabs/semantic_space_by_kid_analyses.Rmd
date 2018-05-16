@@ -97,8 +97,11 @@ vocab_df <- vocab_measures %>%
          log_mean_dist_t1 = log(mean_dist_t1),
          log_var_dist_t1 = log(var_dist_t1),
          log_n_t1 = log(n_t1)) %>%
-  left_join(trigrams %>% select(target_child_id, log_num_trigrams_t1, log_num_trigrams_t2,
-                                mean_log_freq_trigrams_t1, mean_log_freq_trigrams_t2)) %>%
+  left_join(trigrams %>% select(target_child_id, 
+                                log_num_trigrams_t1,
+                                log_num_trigrams_t2,
+                                mean_log_freq_trigrams_t1,
+                                mean_log_freq_trigrams_t2)) %>%
   mutate_if(is.numeric, scale) # scale everything for regressions 
 ```
 
