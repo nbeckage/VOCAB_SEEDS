@@ -38,7 +38,7 @@ So, here I'm doing distance calculations using cosine on the full 300-D space. T
 Broadly, the pattern of findings is that vocabularies with high distance and low variability have high mtld at t2. This is also true for number of trigrams. For trigram frequency, the opposite is true: low distance high variability predicts more frequent trigrams at t2.
 
 ```{r, params}
-MINWORDSFORVOCAB <- 5
+MINWORDSFORVOCAB <- 1
 ```
 
 The min words for vocab here is `r MINWORDSFORVOCAB`.
@@ -88,6 +88,8 @@ vocab_measures <- map2_df(nested_data_by_kid$target_child_id,
 
 Merge in other variables
 ```{r}
+other_measures <- read_csv("semantic_density_df.csv")
+
 vocab_df <- vocab_measures %>%
   left_join(groups_info %>% select(delta_resid_group, target_child_id, mtld_t1, 
                                           mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) %>%
@@ -109,39 +111,19 @@ vocab_df <- vocab_measures %>%
 ### Predicting MTLD at t2
 
 ```{r}
-lm(log_mtld_t2 ~ log_median_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log_n_t1,
+lm(log_mtld_t2 ~ log_median_dist_t1 + age_t1 + age_diff + log_mtld_t1 + log_n_t1,
    data = vocab_df) %>%
   summary()
 
-lm(log_mtld_t2 ~ log_mean_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log_n_t1,
+lm(log_mtld_t2 ~ log_mean_dist_t1 + age_t1 + age_diff + log_mtld_t1 + log_n_t1,
      data = vocab_df) %>%
     summary()
 
-lm(log_mtld_t2 ~ log_var_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log_n_t1,
+lm(log_mtld_t2 ~ log_var_dist_t1 + age_t1 + age_diff + log_mtld_t1 + log_n_t1,
    data = vocab_df) %>%
   summary()
 
-lm(log_mtld_t2 ~ log_median_dist_t1+ log_var_dist_t1 + age_t1 + age_t2 + log_mtld_t1 + log_n_t1,
-   data = vocab_df) %>%
-  summary()
-```
-
-### Predicting change in MTLD
-
-```{r}
-lm(mtld_diff ~ log_median_dist_t1  +  age_t1 + age_t2  + log_mtld_t1 + log_n_t1 ,
-   data = vocab_df) %>%
-  summary()
-
-lm(mtld_diff ~ log_mean_dist_t1  +  age_t1 + age_t2  + log_mtld_t1 + log_n_t1 ,
-   data = vocab_df) %>%
-  summary()
-
-lm(mtld_diff ~ log_var_dist_t1  + age_t1 + age_t2  + log_mtld_t1 + log_n_t1 ,
-   data = vocab_df) %>%
-  summary()
-
-lm(mtld_diff ~ log_median_dist_t1  +  log_var_dist_t1  + age_t1 + age_t2  + log_mtld_t1 + log_n_t1 ,
+lm(log_mtld_t2 ~ log_median_dist_t1+ log_var_dist_t1 + age_t1 + age_diff + log_mtld_t1 + log_n_t1,
    data = vocab_df) %>%
   summary()
 ```

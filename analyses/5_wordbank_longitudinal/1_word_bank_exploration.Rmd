@@ -1,0 +1,165 @@
+---
+title: Word bank exploration
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+library(wordbankr)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+Get all longitidinal data. There's about 650 administrations, all from the same source.
+```{r}
+df <- get_administration_data(language = "English (American)", form = "WS", original_ids = T) %>%
+  mutate(original_id_full = paste0(source_name, "_", original_id))
+
+long_kids <- df %>%
+  filter(longitudinal) %>%
+  count(original_id) %>%
+  arrange(n)
+
+df_long <- df %>%
+  filter(original_id %in% long_kids$original_id) %>%
+  select(original_id, data_id, original_id_full, source_name, age, comprehension, production) %>%
+  mutate(tbin = ifelse(age<24, "t1", "t2"))
+```
+
+Histogram of age distributions: 
+```{r}
+ggplot(df_long, aes(x = age)) +
+  geom_histogram()
+```
+
+In the other analyses we split at about 25 months. Here the split is about the same.
+
+Look at comprehension and production for these two groups.
+
+Hmm... the values are the same, not sure why this is.
+
+```{r}
+df_long %>%
+  select(original_id, tbin, comprehension, production) %>%
+  gather(measure, value, -1:-2) %>%
+  ggplot(aes(x = value, fill = tbin)) +
+  geom_density() +
+  facet_grid(.~  measure)
+```
+
+Let's just look at comprehension
+```{r}
+df_long %>%
+  ggplot(aes(x = tbin, y = comprehension, group = original_id)) +
+  geom_point() +
+  geom_line()
+```
+
+Let's get measure of vocab change
+```{r}
+df_long_delta <- df_long %>%
+  arrange(original_id, tbin) %>%
+  group_by(original_id) %>%
+  mutate(vocab_delta = comprehension - lag(comprehension),
+         age_delta = age - lag(age),
+          vocab_slope = vocab_delta/age_delta) %>%
+  filter(!is.na(vocab_delta)) %>%
+  select(original_id, comprehension, vocab_delta, age_delta, vocab_slope)
+```
+
+Histogram of vocab_delta distributions: 
+```{r}
+ggplot(df_long_delta, aes(x = vocab_slope)) +
+  geom_histogram()
+```
+
+```{r}
+by_word_data <- get_instrument_data(
+    language = "English (American)",
+    form = "WS",
+    iteminfo = T) %>%
+  filter(data_id %in% df_long$data_id) %>% # merge in original ids
+  left_join(distinct(df_long, data_id, original_id, tbin)) %>% 
+  filter(value == "produces") %>%
+  select(original_id, tbin, uni_lemma, category) 
+```
+
+
+Merge in centrality data.
+
+Most words have measures
+```{r}
+density_norms <-read_csv(RCurl::getURL("https://raw.githubusercontent.com/billdthompson/semantic-density-norms/master/results/en-semantic-densities-N100000.csv?token=AF32iXP7uN49YWb0EglCMjVLCP56VLAfks5bGBfqwA%3D%3D")) %>%
+  rename(semantic_density = `semantic-density`, 
+         centrality = `global-centrality`) %>%
+  select(word, centrality, semantic_density) 
+
+t1_words_with_centrality <- by_word_data %>%
+  filter(tbin == "t1") %>%
+  distinct(uni_lemma) %>%
+  left_join(density_norms, by = c("uni_lemma" = "word")) 
+
+summary(t1_words_with_centrality)
+```
+
+Get means by kid and merge in outcomes measurs
+```{r}
+
+t1_data_with_centrality <- by_word_data %>%
+  filter(tbin == "t1") %>%
+  left_join(density_norms, by = c("uni_lemma" = "word"))  %>%
+  filter(!is.na(centrality))
+
+t1_ms <- t1_data_with_centrality %>%
+  group_by(original_id, tbin) %>%
+  summarize(mean_centrality = mean(centrality),
+            mean_semantic_density = mean(semantic_density))
+
+t1_ms_with_outcome <- t1_ms   %>%
+  left_join(df_long_delta %>% select(original_id,vocab_slope )) %>%
+  left_join(df_long %>% filter(tbin == "t1") %>% select(original_id, comprehension))
+```
+
+Both are negativel associated
+```{r}
+t1_ms_with_outcome %>%
+  filter(mean_centrality < .18) %>%
+  ggplot(aes(x = mean_centrality, y = vocab_slope)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+t1_ms_with_outcome %>%
+  ggplot(aes(x = mean_semantic_density, y = vocab_slope)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+```{r}
+lm(vocab_slope ~ mean_centrality + comprehension, t1_ms_with_outcome) %>%
+  summary()
+```
+
+```{r}
+lm(vocab_slope ~ mean_semantic_density + comprehension, t1_ms_with_outcome) %>%
+  summary()
+
+lm(vocab_slope ~ mean_semantic_density + mean_centrality + comprehension, t1_ms_with_outcome) %>%
+  summary()
+```
+

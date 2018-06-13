@@ -1,0 +1,175 @@
+---
+title: Semantic centrality analyses
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+runtime: shiny
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+library(tidyverse)
+library(corrplot)
+library(shiny)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+
+theme_set(theme_classic(base_size = 15))
+```
+
+This is similiar to the previous analyses with a few modifications. 
+
+* dropped density measure for simplification (it's highly correlated with centrality, and more complex)
+* added measure of transcript length - turns out it's highly correlated with number of types measure, and linearly related
+* added n kid trigrams measure
+
+```{r}
+vocab_df_trim <- read_csv("semantic_density_tidy_df_MIN1.csv")
+```
+
+## Pairwise correlations
+```{r, fig.width = 10, fig.height = 10}
+ALPHA <- .05
+corr_mat <- cor(vocab_df_trim, 
+                use = "pairwise.complete.obs")
+
+p.mat <- cor.mtest(vocab_df_trim, 
+                  conf.level = (1-ALPHA),  
+                  use = "pairwise.complete.obs")$p
+
+cols = rev(colorRampPalette(c("red", "white", "blue"))(100))
+
+corrplot(corr_mat, method = "color",  col = cols,
+         type = "upper", order = "original", number.cex = .7,
+         addCoef.col = "black", 
+         p.mat = p.mat, sig.level = ALPHA, insig = "blank", 
+         tl.col = "black", tl.srt = 90,
+         diag = FALSE)
+```
+
+
+### Explore correlations between measures
+```{r}
+shinyApp(
+
+  ui = fluidPage(
+    tags$head(tags$style(type = "text/css", '.well{width: 520px}')),
+        selectInput("xvar", "X variable",  names(vocab_df_trim), selected = "log_n_parent_trigrams_t1"),
+        selectInput("yvar", "Y variable",  names(vocab_df_trim), selected = "log_n_parent_trigrams_t2"),
+    plotOutput("scatter_plot")
+  ),
+  
+  server = function(input, output) {
+    
+    output$scatter_plot <- renderPlot({
+      ggplot(vocab_df_trim, aes_string(input$xvar, input$yvar)) +
+        geom_point() +
+        geom_smooth(alpha = .4) +
+        geom_smooth(method = "lm", color = "red") 
+
+    })
+  },
+  
+  options = list(height = 600)
+)
+
+```
+
+
+## Regressions
+### Predicting log_n_kid_trigrams_t2
+```{r}
+lm(log_n_kid_trigrams_t2 ~ 
+     log_centrality_t1 +
+     age_diff +
+     log_n_kid_trigrams_t1 +
+     mean_log_word_freq_t1 + 
+     mean_log_word_freq_t2 +
+     log_transcript_length_t1 +
+     log_transcript_length_t2,
+     vocab_df_trim) %>%
+  summary()
+
+lm(log_n_kid_trigrams_t2 ~ 
+     log_centrality_t1 +
+     age_diff +
+     log_n_kid_trigrams_t1 +
+     mean_log_word_freq_t1 + 
+     mean_log_word_freq_t2 +
+     log_transcript_length_t1,
+     #log_transcript_length_t2,
+     vocab_df_trim %>% filter(log_centrality_t1 > -1.95)) %>%
+  summary()
+```
+
+### Predicting log_n_parent_trigrams_t2
+```{r}
+lm(log_n_parent_trigrams_t2 ~ 
+     log_centrality_t1 +
+     age_diff +
+     log_n_parent_trigrams_t1 +
+     log_transcript_length_t1 +
+     mean_log_word_freq_t1   +
+     mean_log_word_freq_t2,
+     vocab_df_trim) %>%
+  summary()
+
+lm(log_n_parent_trigrams_t2 ~ 
+     log_centrality_t1 +
+     age_diff +
+     log_n_parent_trigrams_t1 +
+     log_transcript_length_t1 +
+     mean_log_word_freq_t1   +
+     mean_log_word_freq_t2,
+     vocab_df_trim %>% filter(log_centrality_t1 > -1.95)) %>%
+  summary()
+
+lm(log_n_parent_trigrams_t2 ~ 
+     log_centrality_t1 +
+     age_diff +
+     log_n_parent_trigrams_t1 +
+     log_transcript_length_t1 +
+     mean_log_word_freq_t1   +
+     mean_log_word_freq_t2,
+     vocab_df_trim %>% filter(log_centrality_t1 > -1.95)) %>%
+  summary()
+
+
+```
+
+### Predicting log_mtld_t2
+```{r}
+lm(log_mtld_t2 ~ 
+     log_centrality_t1+
+     age_diff +
+     log_transcript_length_t1 +
+     log_mtld_t1,
+     vocab_df_trim) %>%
+  summary()
+
+lm(log_mtld_t2 ~ 
+     log_centrality_t1+
+     age_diff +
+     log_mtld_t1,
+     vocab_df_trim %>% filter(log_centrality_t1 > -1.95)) %>%
+  summary()
+
+
+vocab_df_trim %>%  
+  lm(formula = log_n_kid_trigrams_t2 ~ 
+       log_centrality_t1 +
+       age_diff+
+       log_transcript_length_t1+
+       log_n_kid_trigrams_t1 +
+       mean_log_word_freq_t1 +
+       mean_log_word_freq_t2, data = .) %>% summary
+
+```

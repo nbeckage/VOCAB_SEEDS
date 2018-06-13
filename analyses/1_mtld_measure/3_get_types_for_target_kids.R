@@ -4,7 +4,7 @@ library(childesr)
 library(tidyverse)
 
 ######### PARAMETERS ############
-
+NDAYS_PER_YEAR <- 365.2425
 OPTIMAL_CUTOFF <- 750
 RANGE <- 150
 MURMURS = c("xxx", "yyy", "yyy_yyy","---",

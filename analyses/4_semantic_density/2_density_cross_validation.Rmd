@@ -1,0 +1,383 @@
+---
+title: Semantic density analyses - cross validation
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+params: 
+  MINWORDSFORVOCAB: 1
+  NSAMPLES: 100
+  TRAIN_FRACTION: .8
+      
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+library(tidyverse)
+library(boot)
+library(broom)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+Regression models suggest that vocabulary density at t1 is negatively associated with mtld at time 2: Kids who know words that are less dense in semantic space at t1 have higher vocabulary diversity at t2. In this analysis, I do a repeated cross-validation procedure by sampling 80% of the kids and use their vocabulary at t1 to predict the outcomes of the other 20% kids at t2. To do this, I took all the words that kids knew at t1 and scaled the centrality and density values  such that the mean was zero; values above zero suggest that the words is relatively central/dense, and words below zero indicate that the word is relatively less central/dense. For the weighted measure, I multiplied the scaled centrality/density value by the log of the number of kids at t1 that said that word. Then for thes testing kids, I subsetted their t1 vocabulary to only the words that kids in the training group knew at t1. For each kid in the test group, I then took their mean vocabulary centrality/density t1 and their mtld at t2. Then I estimated the correlation between the mean centrality/density at t1 and mtld at time 2 across kids for kids in the testing set. I repeated this NSAMPLES times and then bootstrapped means and CIs of this estimate.
+
+As predicted, we find a negative correlation between vocabulary density and mtld at t2.
+
+One thing to note here is that their is an analytical decision to be made in terms of how you scale the variables - do you scale them with respect to all words or only the words that kids tend to know. Here I have done the latter.
+
+
+```{r read_data}
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+mtld_outcomes <- read_csv("semantic_density_df.csv")
+density_norms <-read_csv(RCurl::getURL("https://raw.githubusercontent.com/billdthompson/semantic-density-norms/master/results/en-semantic-densities-N100000.csv?token=AF32iXP7uN49YWb0EglCMjVLCP56VLAfks5bGBfqwA%3D%3D")) %>%
+  rename(semantic_density = `semantic-density`, 
+         centrality = `global-centrality`) %>%
+  select(word:semantic_density) 
+```
+
+
+```{r get_vocabs}
+nested_data_by_kid_t1 <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= params$MINWORDSFORVOCAB)  %>%
+  nest(-target_child_id)
+
+nested_data_by_kid_t2 <- all_types %>%
+  filter(tbin == "t2") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= params$MINWORDSFORVOCAB) %>%
+  nest(-target_child_id)
+```
+
+```{r cross_validation_function}
+# function for cross-validation
+get_corr_for_sample <- function(i, 
+                                kid_t1_data,
+                                mtld_data,
+                                norms,
+                                fraction_sampled,
+                                this_measure){
+  
+   # training kids
+   training_kids <- kid_t1_data  %>%
+      sample_frac(fraction_sampled) %>%
+      unnest() %>%
+      select(-count) %>%
+      mutate(this_measure = this_measure)
+   
+   training_kids_with_measure <- training_kids %>%
+    count(gloss_clean) %>%
+    left_join(norms, by = c("gloss_clean" = "word")) %>%
+    filter(!is.na(semantic_density)) %>%
+    mutate(norm_measure = case_when(this_measure == "centrality" ~ centrality,
+                                    this_measure == "semantic_density" ~ semantic_density),
+           weighted_measure = norm_measure*log(n)) %>%
+    select(gloss_clean, norm_measure, weighted_measure)
+  
+     # testing kids
+    testing_kids_with_measure <- kid_t1_data %>%
+      filter(!(target_child_id %in% training_kids$target_child_id)) %>%
+      unnest() %>%
+      left_join(training_kids_with_measure) %>% # merge in density of words from kid 2
+      group_by(target_child_id) %>%
+      summarize(norm_measure_mean = mean(norm_measure, na.rm = T),
+                weighted_measure_mean = mean(weighted_measure, na.rm = T))
+  
+    testing_kids_with_measure_mtld <- testing_kids_with_measure %>%
+      left_join(mtld_data %>% select(target_child_id, log_mtld_t2)) 
+    
+    data.frame(sample = i,
+               norm_measure_mean_corr = cor(testing_kids_with_measure_mtld$log_mtld_t2,
+                                                    testing_kids_with_measure_mtld$norm_measure_mean)[[1]],
+               weighted_measure_mean_corr = cor(testing_kids_with_measure_mtld$log_mtld_t2,
+                                                        testing_kids_with_measure_mtld$weighted_measure_mean)[[1]])
+}
+
+```
+
+## Correlation {.tabset}
+### Semantic Density
+```{r}
+all_t1_words <- nested_data_by_kid_t1  %>%
+              unnest() %>% 
+              select(gloss_clean) %>%
+              unlist(use.names = F)
+
+density_norms_scaled <- density_norms %>%
+  filter(word %in% all_t1_words) %>%
+  mutate(centrality = scale(centrality),
+         semantic_density = scale(semantic_density))
+
+sampled_corrs <- map_df(c(1:params$NSAMPLES), 
+                        get_corr_for_sample, 
+                        nested_data_by_kid_t1, 
+                        mtld_outcomes, 
+                        density_norms,
+                        params$TRAIN_FRACTION,
+                        "semantic_density")
+
+```
+
+Distribution of correlations between mtld_t1
+```{r, fig.height = 4}
+
+sampled_corrs %>%
+  gather(corr_type, value, -1) %>%
+  ggplot(aes(x = value, fill = corr_type)) +
+  geom_density(alpha = .8) +
+  geom_vline(aes(xintercept = 0), linetype = 2) +
+  facet_wrap(~corr_type) +
+  theme(legend.position = "none")
+```
+
+
+Bootsrap correlation coefficient across samples
+```{r}
+boot_unweighted_corr  <- boot(sampled_corrs$norm_measure_mean_corr, 
+          function(d, i) {mean(d[i])}, R = 1000)  
+
+boot_weighted_corr  <- boot(sampled_corrs$weighted_measure_mean_corr, 
+          function(d, i) {mean(d[i])}, R = 1000) 
+
+estimate_df <- data.frame(corr_type = c("unweighted", "weighted"),
+                          corr =  c(boot_unweighted_corr$t0, boot_weighted_corr$t0), 
+                          ci_low = c(boot.ci(boot_unweighted_corr)$normal[2], boot.ci(boot_weighted_corr)$normal[2]), 
+                          ci_high = c(boot.ci(boot_unweighted_corr)$normal[3], boot.ci(boot_weighted_corr)$normal[3]))
+
+kable(estimate_df)
+```
+
+```{r, fig.height = 4}
+ggplot(estimate_df, aes(x = corr_type, y = corr, color = corr_type)) +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high),size = .8) +
+  ylab("estimated correlation coefficient of\nvocabulary density and mtld at time 2") +
+  ylim(-.4, .2) +
+  geom_hline(aes(yintercept = 0), linetype = 2)+
+  theme(legend.position = "none")
+```
+
+
+### Centrality
+```{r}
+sampled_corrs <- map_df(c(1:params$NSAMPLES), 
+                        get_corr_for_sample, 
+                        nested_data_by_kid_t1, 
+                        mtld_outcomes, 
+                        density_norms,
+                        params$TRAIN_FRACTION,
+                        "centrality")
+```
+
+Distribution of correlations between mtld_t1
+```{r, fig.height = 4}
+sampled_corrs %>%
+  gather(corr_type, value, -1) %>%
+  ggplot(aes(x = value, fill = corr_type)) +
+  geom_density(alpha = .8) +
+  geom_vline(aes(xintercept = 0), linetype = 2) +
+  facet_wrap(~corr_type) +
+  theme(legend.position = "none")
+```
+
+Bootsrap correlation coefficient across samples
+```{r}
+boot_unweighted_corr  <- boot(sampled_corrs$norm_measure_mean_corr, 
+          function(d, i) {mean(d[i])}, R = 1000)  
+
+boot_weighted_corr  <- boot(sampled_corrs$weighted_measure_mean_corr, 
+          function(d, i) {mean(d[i])}, R = 1000) 
+
+estimate_df <- data.frame(corr_type = c("unweighted", "weighted"),
+                          corr =  c(boot_unweighted_corr$t0, boot_weighted_corr$t0), 
+                          ci_low = c(boot.ci(boot_unweighted_corr)$normal[2], boot.ci(boot_weighted_corr)$normal[2]), 
+                          ci_high = c(boot.ci(boot_unweighted_corr)$normal[3], boot.ci(boot_weighted_corr)$normal[3]))
+
+kable(estimate_df)
+```
+
+```{r, fig.height = 4}
+ggplot(estimate_df, aes(x = corr_type, y = corr, color = corr_type)) +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high), size = .3) +
+  ylab("estimated correlation coefficient of \nvocabulary centrality and mtld at time 2") +
+  ylim(-.2, .2) +
+  geom_hline(aes(yintercept = 0), linetype = 2)+
+  theme(legend.position = "none")
+```
+
+## Controlling for stuff {.tabset}
+
+
+Number of age diff, age t1, and log_mtld_t1, and log_total_words_t1
+
+### Semantic Density
+```{r cross_validation_function2}
+# function for cross-validation
+get_corr_for_sample2 <- function(i, 
+                                kid_t1_data,
+                                outcome_data,
+                                norms,
+                                fraction_sampled,
+                                this_measure){
+  
+   # training kids
+   training_kids_words <- kid_t1_data  %>%
+      sample_frac(fraction_sampled) %>%
+      unnest() %>%
+      select(-count) %>%
+      mutate(this_measure = this_measure)
+   
+   training_kids_words_with_measure <- training_kids_words %>%
+    count(gloss_clean) %>%
+    left_join(norms, by = c("gloss_clean" = "word")) %>%
+    filter(!is.na(semantic_density)) %>%
+    mutate(norm_measure = case_when(this_measure == "centrality" ~ centrality,
+                                    this_measure == "semantic_density" ~ semantic_density),
+           weighted_measure = norm_measure*log(n)) %>%
+    select(gloss_clean, norm_measure, weighted_measure)
+  
+     # testing kids
+    testing_kids_with_measure <- kid_t1_data %>%
+      filter(!(target_child_id %in% training_kids_words$target_child_id)) %>%
+      unnest() %>%
+      left_join(training_kids_words_with_measure) %>% # merge in density of words from kid 2
+      group_by(target_child_id) %>%
+      summarize(norm_measure_mean = mean(norm_measure, na.rm = T),
+                weighted_measure_mean = mean(weighted_measure, na.rm = T))
+  
+    testing_kids_with_measure_mtld <- testing_kids_with_measure %>%
+      left_join(outcome_data) 
+    
+    mean_stat <- lm(log_mtld_t2~ norm_measure_mean + age_diff +  log_mtld_t1 + age_t1 + log_total_words_t1, testing_kids_with_measure_mtld) %>%
+      summary() %>%
+      tidy() %>%
+      filter(term == "norm_measure_mean") %>%
+      pull(statistic)
+    
+      weighted_mean_stat <- lm(log_mtld_t2~
+                                 weighted_measure_mean + age_diff + log_mtld_t1 + age_t1 + log_total_words_t1, testing_kids_with_measure_mtld) %>%
+      summary() %>%
+      tidy() %>%
+      filter(term == "weighted_measure_mean") %>%
+      pull(statistic)
+    
+    data.frame(sample = i,
+               norm_measure_mean_stat = mean_stat,
+               weighted_measure_mean_stat = weighted_mean_stat)
+}
+
+```
+
+```{r}
+sampled_stats <- map_df(c(1:params$NSAMPLES), 
+                        get_corr_for_sample2, 
+                        nested_data_by_kid_t1, 
+                        mtld_outcomes, 
+                        density_norms,
+                        params$TRAIN_FRACTION,
+                        "semantic_density")
+
+```
+
+Distribution of test statistcs of density as a predictor of mtld at t2
+```{r, fig.height = 4}
+sampled_stats %>%
+  gather(corr_type, value, -1) %>%
+  ggplot(aes(x = value, fill = corr_type)) +
+  geom_density(alpha = .8) +
+  geom_vline(aes(xintercept = 2), linetype = 2) +
+  geom_vline(aes(xintercept = -2), linetype = 2) +
+  facet_wrap(~corr_type) +
+  theme(legend.position = "none")
+```
+
+
+Bootsrap correlation statistic across samples
+```{r}
+boot_unweighted_stat  <- boot(sampled_stats$norm_measure_mean_stat, 
+          function(d, i) {mean(d[i])}, R = 1000)  
+
+boot_weighted_stat  <- boot(sampled_stats$weighted_measure_mean_stat, 
+          function(d, i) {mean(d[i])}, R = 1000) 
+
+estimate_df <- data.frame(stat_type = c("unweighted", "weighted"),
+                          stat =  c(boot_unweighted_stat$t0, boot_weighted_stat$t0), 
+                          ci_low = c(boot.ci(boot_unweighted_stat)$normal[2], boot.ci(boot_weighted_stat)$normal[2]), 
+                          ci_high = c(boot.ci(boot_unweighted_stat)$normal[3], boot.ci(boot_weighted_stat)$normal[3]))
+
+kable(estimate_df)
+```
+
+```{r, fig.height = 4}
+ggplot(estimate_df, aes(x = stat_type, y = stat, color = stat_type)) +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high), size = .3) +
+  ylab("estimated statistic of density coefficient \npredicting mtld at t2") +
+  geom_hline(aes(yintercept = 2), linetype = 2)+
+  geom_hline(aes(yintercept = -2), linetype = 2)+
+  theme(legend.position = "none")
+```
+
+
+### Centrality
+```{r}
+sampled_stats <- map_df(c(1:params$NSAMPLES), 
+                        get_corr_for_sample2, 
+                        nested_data_by_kid_t1, 
+                        mtld_outcomes, 
+                        density_norms,
+                        params$TRAIN_FRACTION,
+                        "centrality")
+
+```
+
+Distribution of test statistcs of centrality as a predictor of mtld at t2
+```{r, fig.height = 4}
+sampled_stats %>%
+  gather(corr_type, value, -1) %>%
+  ggplot(aes(x = value, fill = corr_type)) +
+  geom_density(alpha = .8) +
+  geom_vline(aes(xintercept = 2), linetype = 2) +
+  geom_vline(aes(xintercept = -2), linetype = 2) +
+  facet_wrap(~corr_type) +
+  theme(legend.position = "none")
+```
+
+
+Bootsrap correlation statistic across samples
+```{r}
+boot_unweighted_stat  <- boot(sampled_stats$norm_measure_mean_stat, 
+          function(d, i) {mean(d[i])}, R = 1000)  
+
+boot_weighted_stat  <- boot(sampled_stats$weighted_measure_mean_stat, 
+          function(d, i) {mean(d[i])}, R = 1000) 
+
+estimate_df <- data.frame(stat_type = c("unweighted", "weighted"),
+                          stat =  c(boot_unweighted_stat$t0, boot_weighted_stat$t0), 
+                          ci_low = c(boot.ci(boot_unweighted_stat)$normal[2], boot.ci(boot_weighted_stat)$normal[2]), 
+                          ci_high = c(boot.ci(boot_unweighted_stat)$normal[3], boot.ci(boot_weighted_stat)$normal[3]))
+
+kable(estimate_df)
+```
+
+```{r, fig.height = 4}
+ggplot(estimate_df, aes(x = stat_type, y = stat, color = stat_type)) +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high), size = .3) +
+  ylab("estimated statistic of centrality coefficient \npredicting mtld at t2") +
+  geom_hline(aes(yintercept = 2), linetype = 2) +
+  geom_hline(aes(yintercept = -2), linetype = 2) +
+  theme(legend.position = "none")
+```
+

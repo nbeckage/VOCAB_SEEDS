@@ -1,0 +1,172 @@
+---
+title: Semantic density analyses - cross validation
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+params: 
+  MINWORDSFORVOCAB: 1
+  NSAMPLES: 100
+  TRAIN_FRACTION: .8
+      
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+library(tidyverse)
+library(boot)
+library(broom)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = T, tidy = F)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+```{r}
+#params = list(MINWORDSFORVOCAB = 1, NSAMPLES = 5, TRAIN_FRACTION = .8)
+
+```
+
+
+```{r read_data}
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv")
+kid_data <- read_csv("semantic_density_df.csv")
+```
+
+```{r get_vocabs}
+nested_data_by_kid_t1 <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= params$MINWORDSFORVOCAB)  %>%
+  nest(-target_child_id)
+
+nested_data_by_kid_t2 <- all_types %>%
+  filter(tbin == "t2") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= params$MINWORDSFORVOCAB) %>%
+  nest(-target_child_id)
+```
+
+```{r cross_validation_function}
+# gets beta for single word
+get_beta <- function(target_word, df){
+  current_df <- df %>%
+    mutate(target_word_present = unlist(map(data,function(x){target_word %in% x$gloss_clean})))
+  
+    lm(log_mtld_t2 ~ target_word_present + age_t1 + age_diff + log_mtld_t1, data = current_df) %>%
+      tidy() %>%
+      filter(term == "target_word_presentTRUE") %>%
+      select(-term) %>%
+      mutate(outcome = "log_mtld_t2",
+             gloss_clean = target_word)
+}
+
+# for all words get beta
+get_by_word_measure <- function(df){
+  targ_words <- df %>%
+    unnest() %>%
+    count(gloss_clean) %>%
+    filter(n > 5)
+  
+  word_beta <- map_df(targ_words$gloss_clean, get_beta, df) 
+
+}
+
+# wrapper function for cross-validation
+get_corr_for_sample <- function(i, 
+                                kid_t1_data,
+                                kid_meta_data,
+                                fraction_sampled){
+    print(i)
+  
+   # training kids
+   training_kids <- kid_t1_data  %>%
+      sample_frac(fraction_sampled) %>%
+      left_join(kid_meta_data)
+   
+   by_words_measure <- get_by_word_measure(training_kids) %>%
+     as_data_frame %>%
+     mutate(scaled_betas = scale(estimate) %>% as.vector) # scale betas
+
+     # testing kids
+    testing_kids_with_measure <- kid_t1_data %>%
+      filter(!(target_child_id %in% training_kids$target_child_id)) %>%
+      unnest() %>%
+      left_join(by_words_measure) %>% # merge in density of words from kid 2
+      group_by(target_child_id) %>%
+      summarize(mean_beta = mean(scaled_betas, na.rm = T))
+  
+    testing_kids_with_measure_mtld <- testing_kids_with_measure %>%
+      left_join(kid_meta_data %>% select(target_child_id, log_mtld_t2)) 
+    
+    list(sample = i, 
+        measure_mean_corr = cor(testing_kids_with_measure_mtld$log_mtld_t2,
+                                       testing_kids_with_measure_mtld$mean_beta)[[1]],
+          beta_df = by_words_measure)
+}
+
+```
+
+## Correlation {.tabset}
+### MTLD
+```{r}
+kid_data_tidy <- kid_data %>%
+  select(target_child_id, log_total_words_t1, log_total_words_t2, 
+         age_t1, age_t2, log_mtld_t1, log_mtld_t2, age_diff, 
+         log_num_trigrams_t1, log_num_trigrams_t2)
+
+sampled_corrs <- map(c(1:params$NSAMPLES), 
+                        get_corr_for_sample, 
+                        nested_data_by_kid_t1, 
+                        kid_data_tidy, 
+                        params$TRAIN_FRACTION)
+
+m = map(sampled_corrs, ~ .x$beta_df) %>%
+  bind_rows() %>%
+  group_by(gloss_clean) %>%
+  summarize(scaled_betas = mean(scaled_betas)) %>%
+  arrange(-scaled_betas)
+
+corrs2 <- map(sampled_corrs, ~ .x$measure_mean_corr) %>%
+  unlist() 
+
+```
+
+```{r, fig.height = 4}
+ggplot(data.frame(corrs = corrs2), aes(x = corrs2)) +
+  geom_density() +
+  geom_vline(aes(xintercept = 0), linetype = 2) +
+  theme(legend.position = "none")
+```
+
+
+Bootsrap correlation coefficient across samples
+```{r}
+boot_corr  <- boot(corrs2, 
+          function(d, i) {mean(d[i])}, R = 1000) 
+
+estimate_df <- data.frame(
+                          corr =   boot_corr$t0, 
+                          ci_low = boot.ci(boot_corr)$normal[2],
+                          ci_high = boot.ci(boot_corr)$normal[3])
+
+kable(estimate_df)
+```
+
+```{r, fig.height = 4}
+ggplot(estimate_df, aes(x = 1, y = corr)) +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high),size = .8) +
+  ylab("estimated correlation coefficient of\nvocabulary density and mtld at time 2") +
+  geom_hline(aes(yintercept = 0), linetype = 2)+
+  theme(legend.position = "none")
+```

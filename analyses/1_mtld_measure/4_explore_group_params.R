@@ -1,8 +1,9 @@
 # find groups with best vocab differences
 
 library(tidyverse)
-groups_info <- read_csv( "data/groups_info_diff_600_1000.csv")
-target_types <- read_csv("data/target_types_for_MTLD_kids_600_1000.csv") %>%
+
+groups_info <- read_csv( "data/groups_info_diff_600_900.csv")
+target_types <- read_csv("data/target_types_for_MTLD_kids_600_900.csv") %>%
   group_by(target_child_id, tbin, gloss) %>%
   summarize(count = sum(count))
 
