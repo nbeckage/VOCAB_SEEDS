@@ -6,6 +6,7 @@ library(ngram)
 
 #################### CONSTANTS #######################
 OUTPUT_FILE <- "by_word_df.csv"
+OUTPUT_FILE2 <- "words_by_kid.csv"
 
 #################### FREQ IN CHILD SPEECH (T1/T2) #######################
 NA_kid_utts <- read_csv("../2_trigrams/data/childes_utts/Eng-NA_kid_utts_turn_BY_KID.csv")
@@ -27,8 +28,10 @@ kid_freq_wide <-  kid_freq %>%
 
 #################### PROP KIDS SAID WORD (T1/T2) #######################
 words_by_kid <- tidy_utts %>%
-  group_by(word, target_child_id, tbin) %>%
-  slice(1) 
+  count(word, target_child_id, tbin) %>%
+  arrange(target_child_id)
+
+write_csv(words_by_kid, OUTPUT_FILE2)
 
 prop_said_word <- words_by_kid %>%
   group_by(tbin, word) %>%

@@ -141,9 +141,9 @@ vocab_df_trim_with_names <- read_csv("../1_mtld_measure/data/groups_info_600_900
   select(target_child_id, collection, target_child_name) %>%
   full_join(vocab_df_trim)
 
-childesr::get_speaker_statistics(collection = vocab_df_trim_with_names$collection[1],
-                                 role = "Child",
-                                target_child = vocab_df_trim_with_names$target_child_name[1]) %>%
+childesr::get_speaker_statistics(#target_child = "Colin",
+                                 role = "Child", 
+                                 collection = "Eng-NA") %>%
   data.frame()
                            #age = c(min_age_months, max_age_months))
 

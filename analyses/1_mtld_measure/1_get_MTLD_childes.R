@@ -31,7 +31,7 @@ all_transcripts <- get_transcripts(collection = this_collection,
   filter(language == "eng") %>% # monolinguals only
   mutate(target_child_name_id = paste(corpus_name,  # target_child_id_bad index
                                       target_child_name, sep = "_")) %>%
-  mutate(target_child_age = target_child_age * (NDAYS_PER_YEAR/12))
+  mutate(target_child_age = target_child_age * (NDAYS_PER_YEAR/12)) #transform into days
   
 # filter to more than one and in age range
 longitudinal_transcripts <- all_transcripts %>% 

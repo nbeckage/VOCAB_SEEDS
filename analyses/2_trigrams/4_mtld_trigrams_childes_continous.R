@@ -10,7 +10,6 @@ MINCOUNT <- 1
 
 
 ## Merge data together
-
 groups_info <- read_csv("../1_mtld_measure/data/groups_info_600_900.csv")
 target_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") %>%
   group_by(target_child_id, tbin, gloss) %>%
@@ -20,8 +19,7 @@ target_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_
   filter(count >= MINCOUNT) 
 
 
-#Trigram freq data
-
+# Trigram freq data
 childes_trigrams <- read_csv("data/trigrams/adult_childes_trigrams_turns.csv") %>%
   data.table() 
 
@@ -31,21 +29,18 @@ all_trigrams <- childes_trigrams[w1 %in% all_types &
                                  w2 %in% all_types & 
                                  w3 %in% all_types] 
 
-#Word frequency ata
+# Word frequency data
 freq <- read_tsv("../1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
   mutate(word = tolower(Word))  %>%
     select(word, Lg10WF) 
 
 
 #Get trigrams at t1 and outcome variables
-
-
 # By-kid vocabulary  functions
 get_trigrams_by_kid <- function(df, all_trigrams, measure){
      current_trigrams <- all_trigrams[w1 %in% df$gloss &
-                                 w2 %in% df$gloss & 
-                                 w3 %in% df$gloss]  
-
+                                      w2 %in% df$gloss & 
+                                      w3 %in% df$gloss]  
 
      if (measure == "num"){
         log(nrow(current_trigrams))
@@ -53,7 +48,6 @@ get_trigrams_by_kid <- function(df, all_trigrams, measure){
         mean(log(current_trigrams$freq))
      }
 }
-
 get_word_freq_by_kid <- function(df, freq){
 
   vocab_with_freqs <- left_join(df, freq, by = c("gloss" = "word")) 
@@ -61,7 +55,7 @@ get_word_freq_by_kid <- function(df, freq){
 
 }
 
-
+# trigram num, t1
 trigram_num_by_kid_t1 <- target_types %>%
   filter(tbin == "t1")  %>%
   group_by(target_child_id) %>%
@@ -73,7 +67,7 @@ trigram_num_by_kid_t1 <- target_types %>%
   unnest() %>%
   mutate(log_num_trigrams_t1 = ifelse(!is.finite(log_num_trigrams_t1),
                                       0, log_num_trigrams_t1)) 
-
+# trigram freq, t1
 trigram_freq_by_kid_t1 <- target_types %>%
   filter(tbin == "t1")  %>%
   group_by(target_child_id) %>%
@@ -86,7 +80,7 @@ trigram_freq_by_kid_t1 <- target_types %>%
   mutate(mean_log_freq_trigrams_t1 = ifelse(!is.finite(mean_log_freq_trigrams_t1),
                                             0, mean_log_freq_trigrams_t1))
 
-
+# word freq, t1
 word_freq_by_kid_t1 <- target_types %>%
   filter(tbin == "t1")  %>%
   group_by(target_child_id) %>%
@@ -98,7 +92,8 @@ word_freq_by_kid_t1 <- target_types %>%
   mutate(mean_log_word_freq_t1 = ifelse(!is.finite(mean_log_word_freq_t1),
                                         0, mean_log_word_freq_t1))
 
-# timpointe is vocab at t1 + vocab at t2
+# timpoint is vocab at t1 + vocab at t2
+# trigram num, t2
 trigram_num_by_kid_t2 <- target_types %>%
   group_by(target_child_id) %>%
   nest(-target_child_id) %>%
@@ -110,6 +105,7 @@ trigram_num_by_kid_t2 <- target_types %>%
   mutate(log_num_trigrams_t2 = ifelse(!is.finite(log_num_trigrams_t2),
                                       0, log_num_trigrams_t2)) 
 
+# trigram freq, t2
 trigram_freq_by_kid_t2 <- target_types %>%
   group_by(target_child_id) %>%
   nest(-target_child_id) %>%
@@ -121,7 +117,7 @@ trigram_freq_by_kid_t2 <- target_types %>%
   mutate(mean_log_freq_trigrams_t2 = ifelse(!is.finite(mean_log_freq_trigrams_t2),
                                             0, mean_log_freq_trigrams_t2))
 
-
+# word freq, t2
 word_freq_by_kid_t2 <- target_types %>%
   group_by(target_child_id) %>%
   nest(-target_child_id) %>%
@@ -131,7 +127,6 @@ word_freq_by_kid_t2 <- target_types %>%
   unnest()  %>%
   mutate(mean_log_word_freq_t2 = ifelse(!is.finite(mean_log_word_freq_t2),
                                         0, mean_log_word_freq_t2))
-
 
 vocab_delta <- target_types %>%
   group_by(target_child_id, tbin) %>%

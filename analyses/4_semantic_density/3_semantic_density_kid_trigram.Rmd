@@ -166,10 +166,11 @@ lm(log_mtld_t2 ~
 vocab_df_trim %>%  
   lm(formula = log_n_kid_trigrams_t2 ~ 
        log_centrality_t1 +
-       age_diff+
-       log_transcript_length_t1+
+       age_diff +
        log_n_kid_trigrams_t1 +
        mean_log_word_freq_t1 +
-       mean_log_word_freq_t2, data = .) %>% summary
+       mean_log_word_freq_t2, data = .) %>% 
+  #summary() %>%
+  car::vif()
 
 ```
