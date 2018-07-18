@@ -23,6 +23,6 @@ fewer words
 
 full_join(mcounts, gcounts) %>%
   mutate(diff = n -nn) %>%
-  arrange(-diff)
+  arrange(diff)
 
 kid 15513 t2, has 9177 words molly, 3351 gary
