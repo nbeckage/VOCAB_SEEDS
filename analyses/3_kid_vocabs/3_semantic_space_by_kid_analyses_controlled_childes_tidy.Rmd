@@ -1,0 +1,497 @@
+---
+title: Semantic space by-kid analyses
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+
+```{r, params}
+MINWORDSFORVOCAB <- 5
+```
+
+The min words for vocab here is `r MINWORDSFORVOCAB`.
+
+```{r}
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+mlu_info <- read_csv("mlu_by_kid.csv")
+trans_info <- read_csv("t1_transitional_probs_in_vocab_missing0.csv")
+mcrae_info <- read_csv("mcrae_vocab_by_kid_t1.txt") %>%
+  rename(Per_Corred_Pairs_No_Tax = `%_Corred_Pairs_No_Tax`)
+pos_info <- read_csv("prop_pos_by_kid_t1.csv")
+conc_info <- read_csv("conc_by_kid_t1.csv")
+
+kid_info <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/4_semantic_density/semantic_density_df.csv") %>%
+  left_join(mlu_info) %>%
+  left_join(trans_info) %>%
+  left_join(mcrae_info)%>%
+  left_join(pos_info) %>%
+  left_join(conc_info) %>%
+  mutate(corpus_id = as.factor(corpus_id))
+
+density <- read_csv("bills_density_norms.csv")
+
+trigrams <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/2_trigrams/data/trigrams/kid_childes_trigrams_turns_BY_KID.csv") %>%
+  mutate(log_n_adult_trigrams = log(n_adult_trigrams + 1)) %>%
+  select(target_child_id, log_n_adult_trigrams, tbin) %>%
+  spread("tbin", "log_n_adult_trigrams") %>%
+  mutate(log_n_adult_trigrams_t1 = t1,
+         log_n_adult_trigrams_t2 = t2)
+
+#freq <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
+ # rename(word = Word,
+  #       log_freq = Lg10WF) %>%
+ # select(word, log_freq)
+
+freq <- read_csv("childes_adult_word_freq.csv")
+```
+
+Embedding models
+```{r}
+word2vec_model_childes <- read_csv("3_train_childes_model/childes_adult_w2v.txt") %>%
+  rename(target_word = word)
+word2vec_model_wiki <- read_feather("fast_text_childes_words_600_900.feather") 
+```
+
+Get filtered version of types for each kid
+```{r}
+types_clean <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB) %>%
+  mutate(log_count = log(count)) %>%
+  select(-count) %>%
+  left_join(freq, by= c("gloss_clean" = "word")) %>%
+  mutate(log_count_w1 = log_count,
+         log_count_w2 = log_count,
+         log_freq_w1 = log_freq, 
+         log_freq_w2 = log_freq) %>%
+  select(-log_count, -log_freq)
+```
+
+```{r}
+conc <- read_csv("/Users/mollylewis/Documents/research/Projects/2_published/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  select(Word, Conc.M)
+
+distinct_types <- types_clean %>%
+  left_join(conc, by =c("gloss_clean" = "Word")) %>%
+  ungroup() %>%
+  distinct(gloss_clean, .keep_all = T)
+
+median_conc <- median(distinct_types$Conc.M, na.rm = T)
+
+types_clean <- types_clean %>%
+    left_join(conc, by =c("gloss_clean" = "Word")) %>%
+    filter(Conc.M <= median_conc)
+```
+
+ 
+Get distance measure by kid at t1 in both wikipedia model and adult childes model
+```{r}
+
+
+get_vocab_measure_by_kid3 <- function(id, data, model){
+  this_kids_model <- model %>%
+    filter(target_word %in% data$gloss_clean)
+  
+  words_in_model <- data %>%
+    filter(gloss_clean %in% this_kids_model$target_word)
+
+   # get pairwise distances
+   word_word_dists <- coop::cosine(t(this_kids_model[,-1])) 
+   
+   resid_df <- data.frame(word = this_kids_model$target_word,
+                          mean_dist = rowMeans(word_word_dists)) %>%
+                    left_join(freq) %>%
+                    left_join(density)
+   
+     mean_resid <- NA
+     try({
+      model <- lm(mean_dist ~ log_freq, resid_df)
+      resid_df_with_resids <- resid_df %>%
+                modelr::add_residuals(model, "dist_resids")
+      mean_resid <- mean(resid_df_with_resids$dist_resids, na.rm = T)
+     })
+     
+     
+     mean_centrality_resid <- NA
+     try({
+      model <- lm(centrality ~ log_freq, resid_df)
+      resid_df_with_resids <- resid_df %>%
+                modelr::add_residuals(model, "dist_resids")
+      mean_centrality_resid <- mean(resid_df_with_resids$dist_resids, na.rm = T)
+     })
+                          
+
+     data.frame(target_child_id = id,
+                mean_dist_t1 = mean(log(word_word_dists + 1)),
+                mean_centrality = mean_centrality_resid,
+                mean_dist_resid = mean_resid, 
+              #  var_dist_t1 =  ifelse(mean(var(log(word_word_dists + 1)) == 0, NA,
+              #                         mean(var(log(word_word_dists + 1))))),
+                n_t1 = nrow(word_word_dists),
+                mean_freq_t1 =  mean(words_in_model$log_freq_w1, na.rm = T))
+     
+    
+}
+
+nested_data_by_kid <- nest(types_clean, -target_child_id)
+
+vocab_measures_wiki <- map2_df(nested_data_by_kid$target_child_id, 
+                          nested_data_by_kid$data, 
+                          get_vocab_measure_by_kid3, 
+                          word2vec_model_wiki) %>%
+  rename(mean_dist_t1_wiki = mean_dist_t1, 
+         n_t1_wiki = n_t1,
+         mean_freq_t1_wiki = mean_freq_t1,
+         mean_centrality_wiki = mean_centrality,
+         mean_density_wiki = mean_density,
+
+        mean_dist_resid_wiki= mean_dist_resid)
+
+
+vocab_measures_childes <- map2_df(nested_data_by_kid$target_child_id, 
+                          nested_data_by_kid$data, 
+                          get_vocab_measure_by_kid3, 
+                          word2vec_model_childes) %>%
+  rename(mean_dist_t1_childes = mean_dist_t1, 
+         n_t1_childes = n_t1,
+              mean_centrality_childes = mean_centrality,
+         mean_density_childes = mean_density,
+         mean_freq_t1_childes  = mean_freq_t1,
+         mean_dist_resid_childes = mean_dist_resid)
+
+vocab_measures <- left_join(vocab_measures_wiki, vocab_measures_childes) 
+```
+
+### Mean distance in childes vs. mean distance in wiki model at t1
+```{r}
+ggplot(vocab_measures, aes(x = mean_dist_t1_childes, y = mean_dist_t1_wiki)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+```{r}
+embedding_corr  <- cor.test(vocab_measures$mean_dist_t1_childes, vocab_measures$mean_dist_t1_wiki)
+embedding_corr
+```
+
+They're highly correlated r = `r as.numeric(embedding_corr$estimate)`. 
+
+
+## Other kid-level variables at t1
+
+Get merged dataframe
+```{r}
+vocab_df <- vocab_measures %>%
+  #  filter(n_t1_wiki > 2) %>% # can't look at median distance when there's only two words
+    left_join(kid_info %>% select(target_child_id, 
+                                  log_mtld_t1, 
+                                  log_mtld_t2, 
+                                  age_t1, age_diff , 
+                                  log_transcript_length_t1, log_transcript_length_t2, mlu_m_t1, mlu_m_t2, 
+                                  target_child_sex,
+                                  conc_t1,
+                                #  n_clusters, 
+                                 # mean_trans_prob_t1 , 
+                                 # prop_na_trans_t1,
+                                  Per_Corred_Pairs_No_Tax,
+                                  Num_Corred_Pairs_No_Tax, 
+                                  prop_noun_t1, 
+                                  prop_verb_t1,
+                                  corpus_id, collection_name,
+                                age_t2))  %>%
+  left_join(trigrams %>% select(target_child_id, log_n_adult_trigrams_t1, log_n_adult_trigrams_t2))
+
+
+```
+
+descriptive stats
+```{r, include = F}
+
+DAYSINMONTH <-  30.42
+vocab_df %>%
+  filter(!is.na(Num_Corred_Pairs_No_Tax),
+         !is.na(mlu_m_t1))  %>%
+  summarize(mtld_t1 = mean(exp(log_mtld_t1)),
+            mtld_t2 = mean(exp(log_mtld_t2)),
+            mlu_t1 = mean(exp(mlu_m_t1)),
+            mlu_t2 = mean(exp(mlu_m_t2)),
+          #  log_num_trigrams_t1 = mean(exp(log_num_trigrams_t1)),
+          #  log_num_trigrams_t2 = mean(exp(log_num_trigrams_t2)),
+            
+            min_age_t1 = min(age_t1)/DAYSINMONTH,
+            min_age_t1 = min(age_t1)/DAYSINMONTH,
+            max_age_t1 = max(age_t1)/DAYSINMONTH,
+            age_t1 = mean(age_t1)/DAYSINMONTH,
+            min_age_t2 = min(age_t2)/DAYSINMONTH,
+            max_age_t2 = max(age_t2)/DAYSINMONTH,
+            age_t2 = mean(age_t2)/DAYSINMONTH) %>%
+  kable()
+
+```
+
+### Correlation between variables
+```{r, fig.width=10, fig.height=10}
+df_no_corrs <- vocab_df %>%
+  select(-target_child_id, -target_child_sex, -corpus_id, -collection_name) 
+  #filter_all(all_vars(!is.na(.)))
+
+corr_mat <- cor(df_no_corrs, 
+                use = "pairwise.complete.obs")
+
+p.mat <- corrplot::cor.mtest(df_no_corrs, 
+                  conf.level = .95,  
+                  use = "pairwise.complete.obs")$p
+
+cols <- rev(colorRampPalette(c("red", "white", "blue"))(100))
+
+corrplot::corrplot(corr_mat, method = "color",  col = cols,
+         type = "full", order = "original", number.cex = .7, #order = "hclust"
+         addCoef.col = "black", insig = "blank",
+         p.mat = p.mat, sig.level = .05, 
+         tl.col = "black", tl.srt = 90,
+         diag = FALSE)
+
+#age_t1 
+#log_transcript_length_t1
+#mlu_m_t1*
+#mean_trans_prob_t1
+#prop_noun_t1
+#median_freq_t1_wiki
+```
+
+## Predicting t2 measures
+### Wikipedia{.tabset}
+
+#### MTLD
+```{r}
+lme4::lmer(scale(log_mtld_t2) ~ 
+                  #scale(mean_dist_resid_wiki) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_mtld_t1) +
+                  scale(mean_freq_t1_wiki) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+```
+
+#### MLU
+```{r}
+
+ lme4::lmer(scale(mlu_m_t2) ~ 
+                  #scale(mean_dist_resid_wiki) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                                scale(mean_freq_t1_wiki) +
+
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+```
+ 
+#### Trigrams
+```{r}
+  lme4::lmer(scale(log_n_adult_trigrams_t2) ~ 
+                  #scale(mean_dist_resid_wiki) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                 # scale(mean_centrality_childes) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_n_adult_trigrams_t1) +
+                  scale(mean_freq_t1_wiki) +
+                  scale(mlu_m_t1) +
+                  scale(log_mtld_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+
+  lme4::lmer(scale(log_n_adult_trigrams_t2) ~ 
+                  #scale(mean_dist_resid_wiki) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                  #scale(mean_density_childes) +
+                  scale(age_t1) + 
+                  #scale(prop_noun_t1) +
+                  scale(log_n_adult_trigrams_t1) +
+                 scale(mean_freq_t1_wiki) +
+                  scale(mlu_m_t1) +
+                  scale(log_mtld_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = vocab_df) %>%
+  summary()
+  
+  
+  
+```
+
+### Childes{.tabset}
+
+
+#### MTLD
+```{r}
+lme4::lmer(scale(log_mtld_t2) ~ 
+                  #scale(mean_dist_resid_childes) +
+                  scale(mean_centrality_childes) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  #scale(mean_freq_t1_childes) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+
+lme4::lmer(scale(log_mtld_t2) ~ 
+                  scale(mean_dist_resid_childes) +
+                  #scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data =vocab_df) %>%
+  summary()
+
+
+```
+
+#### MLU
+```{r}
+
+ lme4::lmer(scale(mlu_m_t2) ~ 
+                  scale(mean_dist_resid_childes) +
+                  scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+```
+
+#### Trigrams
+```{r}
+ 
+  lme4::lmer(scale(log_num_trigrams_t2) ~ 
+                  #scale(mean_dist_resid_childes) +
+                  scale(mean_centrality_childes) +
+
+                  scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(log_num_trigrams_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_mtld_t1) +
+                                 scale(mean_freq_t1_childes) +
+
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = filter(vocab_df, !is.na(Num_Corred_Pairs_No_Tax))) %>%
+  summary()
+```
+
+
+## Spaghetti plot
+```{r}
+plot_df <- vocab_df %>%
+  filter(!is.na(Num_Corred_Pairs_No_Tax)) %>%
+  filter(!is.na(mlu_m_t1))
+
+OUTFILE <- "spaghetti_plot.pdf"
+#pdf(OUTFILE)
+plot_df %>%
+  rename(`Time 1` = "log_mtld_t1",
+         `Time 2` = "log_mtld_t2") %>%
+  select(`Time 1`, `Time 2`, target_child_id) %>%
+  gather("timepoint", "value", -target_child_id) %>%
+  ggplot(aes(x = timepoint, y = value, group = target_child_id)) +
+  ylab("Vocabulary size estimate (log MTLD)") +
+  xlab("") +
+  theme(axis.line.x = element_blank(),
+        axis.line.y = element_line(size = 1),
+        axis.ticks = element_blank(),
+        axis.title.y = element_text(size = 14),
+        axis.text.x = element_text(size = 14, color = "black"),
+        axis.text.y = element_text(size = 12)) + 
+  geom_line() +
+  geom_point(color = "red") 
+#dev.off()
+```
+
+
+### Comparing frequency measures
+```{r, include = F, eval = F}
+
+freq1 <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
+  rename(word = Word,
+         log_freq_sublex = Lg10WF) %>%
+  select(word, log_freq_sublex)
+
+freq2 <- read_csv("childes_adult_word_freq.csv")
+
+aoa <- read_csv("/Users/mollylewis/Downloads/kuperman_aoa.csv") %>%
+  select(Word, Rating.Mean) %>%
+    rename(word = Word,
+         aoa = Rating.Mean) 
+
+all_freqs <- freq2 %>%
+  left_join(freq1) %>%
+  left_join(aoa) %>%
+  filter(!is.na(log_freq_sublex))
+
+cor.test(all_freqs$aoa, all_freqs$log_freq)
+cor.test(all_freqs$aoa, all_freqs$log_freq_sublex)
+
+ggplot(all_freqs, aes(x =log_freq, y = aoa)) +
+  geom_point() +
+  geom_smooth(method = "lm") 
+
+ggplot(all_freqs, aes(x = log_freq_sublex, y = aoa)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+
+
+types_clean %>%
+  filter(target_child_id %in% plot_df$target_child_id) %>%
+  ggplot(aes(x = log_freq_w2)) +
+  geom_histogram() +
+  facet_wrap(~target_child_id)
+```

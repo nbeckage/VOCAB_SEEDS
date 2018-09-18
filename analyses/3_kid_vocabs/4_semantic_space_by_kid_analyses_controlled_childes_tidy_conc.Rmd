@@ -1,0 +1,260 @@
+---
+title: Semantic space by-kid analyses
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+
+```{r, params}
+MINWORDSFORVOCAB <- 5
+```
+
+The min words for vocab here is `r MINWORDSFORVOCAB`.
+
+```{r}
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+mlu_info <- read_csv("mlu_by_kid.csv")
+trans_info <- read_csv("t1_transitional_probs_in_vocab_missing0.csv")
+mcrae_info <- read_csv("mcrae_vocab_by_kid_t1.txt") %>%
+  rename(Per_Corred_Pairs_No_Tax = `%_Corred_Pairs_No_Tax`)
+pos_info <- read_csv("prop_pos_by_kid_t1.csv")
+conc_info <- read_csv("conc_by_kid_t1.csv")
+
+kid_info <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/4_semantic_density/semantic_density_df.csv") %>%
+  left_join(mlu_info) %>%
+  left_join(trans_info) %>%
+  left_join(mcrae_info)%>%
+  left_join(pos_info) %>%
+  left_join(conc_info) %>%
+  mutate(corpus_id = as.factor(corpus_id))
+
+freq <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
+  rename(word = Word,
+         log_freq = Lg10WF) %>%
+  select(word, log_freq)
+```
+
+```{r}
+
+```
+
+Embedding models
+```{r}
+word2vec_model_childes <- read_csv("3_train_childes_model/childes_adult_w2v.txt") %>%
+  rename(target_word = word)
+word2vec_model_wiki <- read_feather("fast_text_childes_words_600_900.feather") 
+```
+
+Get filtered version of types for each kid
+```{r}
+types_clean <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB) %>%
+  mutate(log_count = log(count)) %>%
+  select(-count) %>%
+  left_join(freq, by= c("gloss_clean" = "word")) %>%
+  mutate(log_count_w1 = log_count,
+         log_count_w2 = log_count,
+         log_freq_w1 = log_freq, 
+         log_freq_w2 = log_freq) %>%
+  select(-log_count, -log_freq)
+```
+
+```{r}
+conc <- read_csv("/Users/mollylewis/Documents/research/Projects/2_published/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  select(Word, Conc.M)
+
+distinct_types <- types_clean %>%
+  left_join(conc, by =c("gloss_clean" = "Word")) %>%
+  ungroup() %>%
+  distinct(gloss_clean, .keep_all = T)
+
+median_conc <- median(distinct_types$Conc.M, na.rm = T)
+
+types_clean_low <- types_clean %>%
+    left_join(conc, by = c("gloss_clean" = "Word")) %>%
+    filter(Conc.M < median_conc)
+
+types_clean_high <- types_clean %>%
+    left_join(conc, by = c("gloss_clean" = "Word")) %>%
+    filter(Conc.M >= median_conc)
+```
+
+ 
+Get distance measure by kid at t1 in both wikipedia model and adult childes model
+```{r}
+get_vocab_measure_by_kid3 <- function(id, data, model){
+  this_kids_model <- model %>%
+    filter(target_word %in% data$gloss_clean)
+  
+  words_in_model <- data %>%
+    filter(gloss_clean %in% this_kids_model$target_word)
+
+   # get pairwise distances
+   word_word_dists <- coop::cosine(t(this_kids_model[,-1])) 
+   
+     data.frame(target_child_id = id,
+                mean_dist_t1 = mean(word_word_dists),
+                median_dist_t1 = median(word_word_dists),
+                var_dist_t1 =  ifelse(mean(var(word_word_dists)) == 0, NA,
+                                       mean(var(word_word_dists))),
+                n_t1 = nrow(word_word_dists),
+                median_freq_t1 =  median(words_in_model$log_freq_w1, na.rm = T)) 
+    
+}
+
+# low
+nested_data_by_kid_low <- nest(types_clean_low, -target_child_id)
+vocab_measures_childes_low <- map2_df(nested_data_by_kid_low$target_child_id, 
+                          nested_data_by_kid_low$data, 
+                          get_vocab_measure_by_kid3, 
+                          word2vec_model_childes) %>%
+  rename(mean_dist_t1_childes_low = mean_dist_t1,
+         median_freq_t1_childes_low = median_freq_t1)
+
+#high
+nested_data_by_kid_high <- nest(types_clean_high, -target_child_id)
+vocab_measures_childes_high <- map2_df(nested_data_by_kid_high$target_child_id, 
+                          nested_data_by_kid_high$data, 
+                          get_vocab_measure_by_kid3, 
+                          word2vec_model_childes) %>%
+  rename(mean_dist_t1_childes_high = mean_dist_t1,
+         median_freq_t1_childes_high = median_freq_t1)
+
+vocab_measures <- left_join(vocab_measures_childes_low, vocab_measures_childes_high, by = "target_child_id")  %>%
+  mutate(mean_dist_t1_childes_log_low = log(mean_dist_t1_childes_low),
+         mean_dist_t1_childes_log_high = log(mean_dist_t1_childes_high)) %>%
+  select(-mean_dist_t1_childes_low, -mean_dist_t1_childes_high)
+```
+
+## Other kid-level variables at t1
+
+Get merged dataframe
+```{r}
+vocab_df <- vocab_measures %>%
+    left_join(kid_info %>% select(target_child_id, 
+                                  log_mtld_t1, 
+                                  log_mtld_t2, 
+                                  age_t1, age_diff , 
+                                  log_transcript_length_t1, log_transcript_length_t2,  
+                                  log_num_trigrams_t1, log_num_trigrams_t2,
+                                  mlu_m_t1, mlu_m_t2, 
+                                  target_child_sex,
+                                  conc_t1,
+                                #  n_clusters, 
+                                 # mean_trans_prob_t1 , 
+                                 # prop_na_trans_t1,
+                                  #Per_Corred_Pairs_No_Tax,
+                                  Num_Corred_Pairs_No_Tax, 
+                                  prop_noun_t1, 
+                                  prop_verb_t1,
+                                  corpus_id, collection_name,
+                                age_t2)) 
+
+
+```
+
+
+
+## Predicting MTLD at t2 - childes
+#### Mean dist and num corred
+```{r}
+low_mod <- lme4::lmer(scale(log_mtld_t2) ~ 
+                  scale(mean_dist_t1_childes_log_low) + 
+                  #scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(median_freq_t1_childes_low) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = vocab_df) 
+
+summary(low_mod)
+
+high_mod <- lme4::lmer(scale(log_mtld_t2) ~ 
+                  scale(mean_dist_t1_childes_log_high) + 
+                  #scale(Num_Corred_Pairs_No_Tax) +
+                  scale(age_t1) + 
+                  scale(prop_noun_t1) +
+                  scale(median_freq_t1_childes_high) +
+                  scale(log_mtld_t1) +
+                  scale(mlu_m_t1) +
+                  scale(log_transcript_length_t1) + 
+             (1|corpus_id),
+   data = vocab_df) 
+
+summary(high_mod)
+```
+
+```{r}
+conf_low <- low_mod %>%
+  confint %>%
+  as.data.frame %>%
+  rownames_to_column %>%
+  filter(rowname %in% c("scale(mean_dist_t1_childes_log_low)", "scale(Num_Corred_Pairs_No_Tax)")) 
+
+
+ts_low <- summary(low_mod)$coefficients %>%
+    as.data.frame %>%
+    rownames_to_column %>%
+    filter(rowname %in% c("scale(mean_dist_t1_childes_log_low)", "scale(Num_Corred_Pairs_No_Tax)")) %>%
+  left_join(conf_low) %>%
+  mutate(group = "low")
+
+conf_high<- high_mod %>%
+  confint %>%
+  as.data.frame %>%
+  rownames_to_column %>%
+  filter(rowname %in% c("scale(mean_dist_t1_childes_log_high)", "scale(Num_Corred_Pairs_No_Tax)")) 
+
+
+ts_high<- summary(high_mod)$coefficients %>%
+    as.data.frame %>%
+    rownames_to_column %>%
+    filter(rowname %in% c("scale(mean_dist_t1_childes_log_high)", "scale(Num_Corred_Pairs_No_Tax)")) %>%
+  left_join(conf_high) %>%
+  mutate(group = "high")
+
+t_df <- bind_rows(ts_low, ts_high) %>%
+  mutate(variable = c("log_mean_dist_t1",
+                      "Num_Corred_Pairs_No_Tax",
+                      "log_mean_dist_t1",
+                      "Num_Corred_Pairs_No_Tax")) %>%
+  rename(low_ci = `2.5 %`, 
+         high_ci = `97.5 %`)
+
+ggplot(t_df, aes(y = Estimate, fill = group, group = group, x = variable)) +
+  xlab("Concreteness group") +
+  geom_bar(stat = "identity",   position="dodge") +
+  geom_linerange(aes(ymin = low_ci, 
+                     ymax = high_ci),
+                position=position_dodge(0.9))
+  
+
+

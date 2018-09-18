@@ -16,6 +16,9 @@ analyses/0_exploration/wiki.en.vec
 analyses/0_exploration/results_freq_prob_coca.csv
 analyses/2_trigrams/data/*
 resources/nih-r21-2016.pdf
+analyses/3_kid_vocabs/data/*
+analyses/7_mcdi/data/*
+*mcdi_results.csv
 
 # LaTeX #
 *.bet

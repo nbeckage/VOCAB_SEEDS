@@ -1,0 +1,22 @@
+Hypothesis: kids who have a more "coherent" vocab at t1 have better outcomes at t2.
+
+Test 1: McRae feature coherence predicting MTLD, MLU, potential & attested Ngrams.  How much variance are we accounting for w/ feature coherence?
+	[problem... not great overlap b/w/ mcrae words and kid vocabulary]
+
+Test 2: Neighborhood density predicting MTLD, MLU, potential & attested Ngrams.  
+Test 3: Median distances from CHILDES word embeddings predicting MTLD, MLU, potential & attested trigrams
+Test 4: Small world of words forward association strengths predicting MTLD, MLU, potential & attested trigrams.  
+
+
+Hypothesis: Controlling for vocab num and POS distribution, kids with a **more productive** vocab at t1 (> potential trigrams), will have better language outcomes at t2 (MTLD, NLU, attested trigrams)
+
+
+CDI question: 
+
+Do kids who learn words in the usual order have better outcomes (interesting answer: yes, but some orders are *way* better than the normative ones... If true, can we figure out what those orders have in common with one another?!)
+Procedure: 
+	(1) Use cross-sectional wordbank data to divide words into AoA deciles (just arbitrarily.. can get more granular if needed)
+	(2) For each of Eliana's kids at n initial timepoints, get a "violation" score for out-of-order words at each timepoint (out of order meaning kids are attested to say a word with later normative AoA before knowing lower AoA words)
+(3) Is there a relationship between out-of-orderness and outcomes at T2 (controlling for the usual suspects at t1).
+Prediction is
+	

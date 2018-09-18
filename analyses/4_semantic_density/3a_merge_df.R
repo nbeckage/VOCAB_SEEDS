@@ -5,7 +5,7 @@ library(tidyverse)
 OUTFILE <- "semantic_density_tidy_df_MIN1.csv"
 MINWORDSFORVOCAB <- 1
 
-#Read in data
+# Read in data
 all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
 groups_info <- read_csv("../1_mtld_measure/data/groups_info_600_900_corrected.csv")
 trigrams <- read_csv("../2_trigrams/mtld_continuous_trigram_by_kid_MIN1.csv")
@@ -25,10 +25,13 @@ kid_transcript_length <- read_csv("../2_trigrams/data/trigrams/kid_childes_trigr
 freq <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
   rename(word = Word,
          log_freq = Lg10WF)
+
 #https://raw.githubusercontent.com/billdthompson/semantic-density-norms/master/results/en-semantic-densities-N100000.csv?token=AF32iYZOtAqaZEYwoJQqpElrIXu8s8BKks5bJ80MwA%3D%3D
-density_norms <-read_csv(RCurl::getURL("https://raw.githubusercontent.com/billdthompson/semantic-density-norms/master/results/en-semantic-densities-N100000.csv?token=AF32iYZOtAqaZEYwoJQqpElrIXu8s8BKks5bJ80MwA%3D%3D")) %>%
-  rename(centrality = `global-centrality`) %>%
-  select(word,centrality) 
+density_norms <- read_csv(RCurl::getURL("https://raw.githubusercontent.com/billdthompson/semantic-density-norms/master/results/en-semantic-densities-N100000.csv?token=AF32iQvh61eJISpHPDbR8H24YMwuNsSWks5bfeulwA%3D%3D")) %>%
+  rename(centrality = `global-centrality`,
+         density = `semantic-density`) %>%
+  select(word,centrality, density) 
+#write_csv(density_norms, "bills_density_norms.csv")
 
 #Get filtered version of types for each kid
 nested_data_by_kid_t1 <- all_types %>%
@@ -49,7 +52,6 @@ nested_data_by_kid_t2 <- all_types %>%
 
 
 #Get mean density at t1
-
 get_density_by_kid <- function(id, data, density_norms, freq_norms){
   total_words_t1 <- nrow(data)
   
@@ -101,7 +103,6 @@ vocab_measures <- full_join(vocab_measures_t1, vocab_measures_t2)
 
 
 ## Merge in other variables
-
 vocab_df <- vocab_measures %>%
   left_join(groups_info %>% select(delta_resid_group, target_child_id, mtld_t1, 
                                    mtld_t2, age_t1, age_t2, mtld_diff, age_diff)) %>%
@@ -131,7 +132,6 @@ vocab_df_trim <- vocab_df %>%
 is.na(vocab_df_trim) <- sapply(vocab_df_trim, is.infinite)
 
 # Add in MLU and number of morphemes data
-
 NDAYS_PER_YEAR <- 365.2422 
 ndays_per_month <- NDAYS_PER_YEAR/12
 min_age_months <- 600/ndays_per_month

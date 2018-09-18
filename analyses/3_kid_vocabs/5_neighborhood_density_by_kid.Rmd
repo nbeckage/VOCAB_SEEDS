@@ -1,0 +1,141 @@
+---
+title: Semantic space by-kid analyses - neighborhood density
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+Num corr pairs is correlated at the kid level with mean density at r= .36. But mean density doesn't predict anything; num corr pairs predicts mtld2.
+
+All by kid data
+```{r}
+# outcome and control
+mtld_age <- read_csv("../1_mtld_measure/data/groups_info_600_900_corrected.csv") %>%
+    mutate(log_mtld_t1 = log(mtld_t1),
+         log_mtld_t2 = log(mtld_t2),
+         age_diff = age_t2 - age_t1) %>%
+    select(target_child_id, log_mtld_t1, log_mtld_t2, age_t1, age_t2, age_diff, corpus_name)
+
+transcript_length <- read_csv("data/transcript_length_by_kid.csv") %>%
+  mutate(log_transcript_length_t1 = log(transcript_length_t1),
+         log_transcript_length_t2 = log(transcript_length_t2)) %>%
+  select(-transcript_length_t1, transcript_length_t2)
+trigrams <- read_csv("data/attested_trigrams_by_kid.csv")
+mlu_info <- read_csv("data/mlu_by_kid.csv")
+
+# predictors
+trans_info <- read_csv("data/t1_transitional_probs_in_vocab_missing0.csv")
+mcrae_info <- read_csv("data/mcrae_vocab_by_kid_t1.txt") %>%
+  rename(Per_Corred_Pairs_No_Tax = `%_Corred_Pairs_No_Tax`) %>%
+  select(1:14)
+#pos_info <- read_csv("data/prop_pos_by_kid_t1.csv")
+#conc_info <- read_csv("data/conc_by_kid_t1.csv")
+density_info <- read_csv("data/density_by_kid.csv")
+freq_info <- read_csv("data/frequency_based_on_input_by_kid.csv")
+```
+
+Merge together
+```{r}
+kid_info <- mtld_age %>%
+  left_join(transcript_length) %>%
+  left_join(trigrams) %>%
+  left_join(mlu_info) %>%
+  left_join(trans_info) %>%
+  left_join(mcrae_info)%>%
+  left_join(density_info) %>%
+  left_join(freq_info)
+```
+
+```{r}
+df_no_corrs <- kid_info %>%
+  select(-target_child_id, -target_child_sex, -corpus_name, -collection_name) 
+  #filter_all(all_vars(!is.na(.)))
+
+corr_mat <- cor(df_no_corrs, 
+                use = "pairwise.complete.obs")
+
+p.mat <- corrplot::cor.mtest(df_no_corrs, 
+                  conf.level = .95,  
+                  use = "pairwise.complete.obs")$p
+
+cols <- rev(colorRampPalette(c("red", "white", "blue"))(100))
+
+corrplot::corrplot(corr_mat, method = "color",  col = cols,
+         type = "full", order = "hclust", number.cex = .7,
+         addCoef.col = "black", insig = "blank",
+         p.mat = p.mat, sig.level = .05, 
+         tl.col = "black", tl.srt = 90,
+         diag = FALSE)
+```
+
+
+### MTLD
+```{r}
+
+lme4::lmer(scale(log_mtld_t2) ~ 
+                  scale(mean_density_t1) +
+                  scale(Num_Corred_Pairs_No_Tax) + 
+                  scale(age_t1) + 
+                  scale(age_diff) + 
+                  scale(log_mtld_t1) +
+                  scale(mean_freq_t1) +
+                  scale(log_transcript_length_t1)   +
+                  scale(log_transcript_length_t2) + 
+             (1|corpus_name),
+   data = kid_info) %>%
+  summary()
+
+```
+
+### MLU
+```{r}
+lme4::lmer(scale(mlu_m_t2) ~ 
+                  scale(mean_density_t1) +
+                  scale(Num_Corred_Pairs_No_Tax) + 
+                  scale(age_t1) + 
+                  scale(age_diff) + 
+                  scale(mlu_m_t1)+ 
+                  scale(mean_freq_t1) +
+                  scale(log_transcript_length_t1)   +
+                  scale(log_transcript_length_t2) + 
+             (1|corpus_name),
+   data = kid_info) %>%
+  summary()
+```
+
+
+### Num attested trigrams
+```{r}
+lme4::lmer(scale(n_attested_trigrams_t2) ~ 
+                  scale(mean_density_t1) +
+                  scale(Num_Corred_Pairs_No_Tax) + 
+                  scale(age_t1) + 
+                  scale(age_diff) + 
+                  scale(n_attested_trigrams_t1)+ 
+                  scale(mean_freq_t1) +
+                  scale(log_transcript_length_t1)   +
+                  scale(log_transcript_length_t2) + 
+             (1|corpus_name),
+   data = kid_info) %>%
+  summary()
+```

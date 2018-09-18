@@ -1,0 +1,161 @@
+---
+title: Regression analysis for each word
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(modelr)
+library(broom)
+library(corrplot)
+
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+
+## Predicting mtld at t2
+MODEL: `lm(log_mtld_t2 ~ know_word_at_t1 + log_mtld_t1 + age_t1 + age_diff + log(n_transcripts_t1) + log(n_transcripts_t2), complete_df)`
+
+```{r}
+word_coeffs_min5_t2 <- read_csv("data/word_coeffs_log_mtld_t2.csv") %>%
+  mutate(word = tolower(word))
+
+ggplot(word_coeffs_min5_t2, aes(t)) +
+  geom_histogram() +
+  ggtitle("t-distribution ") +
+  geom_vline(aes(xintercept = 2), color = "red") +
+  geom_vline(aes(xintercept = -2), color = "red") +
+  theme_classic()
+
+```
+
+```{r}
+ word_coeffs_min5_t2 %>%
+  arrange(-t) %>%
+  DT::datatable()
+```
+
+
+## Sanity Check
+
+Do kids who have a high mean t have high mtld at t2? Yes.
+```{r}
+all_types <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+MINWORDSFORVOCAB <- 5
+word_counts <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB)
+
+t1_word_counts_with_ts <- word_counts  %>%
+  left_join(word_coeffs_min5_t2 %>% select(word, t), 
+            by = c("gloss_clean" = "word")) %>%
+  select(-gloss_clean, -count) %>%
+  group_by(target_child_id) %>%
+  summarize(sum_t = sum(t, na.rm = T),
+            mean_t = mean(t, na.rm = T)) 
+
+mtld_age <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/groups_info_600_900_corrected.csv") %>%
+    mutate(log_mtld_t1 = log(mtld_t1),
+         log_mtld_t2 = log(mtld_t2),
+         age_diff = age_t2 - age_t1) %>%
+    select(target_child_id, log_mtld_t1, log_mtld_t2, 
+           age_t1, age_t2, age_diff, corpus_name)
+
+t1_word_counts_with_ts_mtld <- t1_word_counts_with_ts %>%
+  left_join(mtld_age) %>%
+  select(-target_child_id)
+
+t1_word_counts_with_ts_mtld %>%
+ggplot( aes(x =  mean_t , y = log_mtld_t2)) +
+  geom_point()  +
+  geom_smooth(method = "lm") +
+  theme_classic()
+```
+
+Does it hold controlling for stuff? Yes.
+```{r}
+transcript_length <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/transcript_length_by_kid.csv") %>%
+  mutate(log_transcript_length_t1 = log(transcript_length_t1),
+         log_transcript_length_t2 = log(transcript_length_t2)) %>%
+  select(-transcript_length_t1, transcript_length_t2)
+
+freq_info <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/frequency_based_on_input_by_kid.csv")
+
+t1_word_counts_with_ts_mtld <- t1_word_counts_with_ts %>%
+  left_join(mtld_age) %>%
+  left_join(transcript_length) %>%
+  left_join(freq_info)
+
+lm(log_mtld_t2 ~ log_mtld_t1 + mean_t + log_transcript_length_t1 + log_transcript_length_t2 + mean_freq_t1 + mean_freq_t2 + age_diff + age_t1  , t1_word_counts_with_ts_mtld  ) %>%
+  summary()
+```
+
+## Predicting t-value of a word with other measures
+```{r}
+freq <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/childes_adult_word_freq.csv")
+
+density_norms <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/bills_density_norms.csv")
+
+embedding_dist <- read_csv("data/childes_embedding_dist_by_word.csv")
+
+concreteness <- read_csv("/Users/mollylewis/Documents/research/Projects/2_published/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  rename(word = Word) %>%
+  select(word, Conc.M)
+
+concepts <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/CONCS_brm.txt") %>%
+  select(Concept, Familiarity, Length_Syllables, Bigram, 14:33) %>%
+  mutate(Concept = tolower(Concept),
+         Concept = map_chr(Concept, ~ pluck(str_split(., "_"),1,1))) %>%
+  rename(word = Concept) %>%
+  select(word, Mean_Distinct_No_Tax)
+
+word_coeffs_min5_t2_with_vars <- word_coeffs_min5_t2 %>%
+  mutate(word = tolower(word)) %>%
+  left_join(density_norms) %>%
+  left_join(freq) %>%
+  left_join(embedding_dist) %>%
+  left_join(concepts) %>%
+  left_join(concreteness)
+
+lm(t ~ centrality + log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ density  + log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ mean_dist + log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ mean_dist  * log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ Conc.M +  log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ mean_dist +  Conc.M + log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+
+lm(t ~ Conc.M  + mean_dist *  log_freq, word_coeffs_min5_t2_with_vars) %>%
+  summary()
+```
+
+Concreteness and mean distance both predict t score - words that are similiar to other words and highly concrete have large t-scores.

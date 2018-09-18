@@ -1,0 +1,202 @@
+---
+title: Semantic space by-kid analyses
+subtitle: Childes kid + adult
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: false
+    code_folding: hide
+---
+
+```{r setup, message = F, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(langcog)
+library(data.table)
+library(feather)
+
+theme_set(theme_classic(base_size = 10))
+```
+
+
+```{r, params}
+MINWORDSFORVOCAB <- 5
+```
+
+The min words for vocab here is `r MINWORDSFORVOCAB`.
+
+## Get df with all measures
+Read in data
+```{r}
+all_types <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") 
+word2vec_model <- read_csv("3_train_childes_model/childes_kid_adult_w2v.txt") %>%
+  rename(target_word = word)
+mlu_info <- read_csv("mlu_by_kid.csv")
+trans_info <- read_csv("t1_transitional_probs_in_vocab_missing0.csv")
+mcrae_info <- read_csv("mcrae_vocab_by_kid_t1.txt")
+mcrae_clusts <- read_csv("mcrae_clusters_10.csv")
+pos_info <- read_csv("prop_pos_by_kid_t1.csv")
+kid_info <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/4_semantic_density/semantic_density_df.csv") %>%
+  left_join(mlu_info) %>%
+  left_join(trans_info) %>%
+  left_join(mcrae_info)%>%
+  left_join(pos_info) %>%
+  mutate(corpus_id = as.factor(corpus_id))
+
+conc <- read_csv("/Users/mollylewis/Documents/research/Projects/2_published/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  select(Word, Conc.M)
+
+freq <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/1_mtld_measure/data/control_variables/SUBTLEXus_corpus.txt") %>%
+  rename(word = Word,
+         log_freq = Lg10WF) %>%
+  select(word, log_freq)
+```
+
+Get filtered version of types for each kid
+```{r}
+
+types_clean <- all_types %>%
+  filter(tbin == "t1") %>%
+  mutate(gloss_clean = tolower(gloss))   %>%
+  group_by(target_child_id, gloss_clean) %>%
+  summarize(count = sum(count)) %>%
+  filter(count >= MINWORDSFORVOCAB) %>%
+  mutate(log_count = log(count)) %>%
+  select(-count) %>%
+  left_join(freq, by= c("gloss_clean" = "word")) %>%
+  mutate(log_count_w1 = log_count,
+         log_count_w2 = log_count,
+         log_freq_w1 = log_freq, 
+         log_freq_w2 = log_freq) %>%
+  select(-log_count, -log_freq) %>%
+  left_join(mcrae_clusts, by = c("gloss_clean"= "concept")) %>%
+  rename(mcrae_domain = cluster)
+```
+ 
+Get vocab measures by kids
+```{r}
+get_vocab_measure_by_kid3 <- function(id,data, model){
+  this_kids_model <- model %>%
+    filter(target_word %in% data$gloss_clean)
+  
+  words_in_model <- data %>%
+    filter(gloss_clean %in% this_kids_model$target_word)
+
+   # get pairwise distances
+   word_word_dists <- coop::cosine(t(this_kids_model[,-1])) 
+   
+     data.frame(target_child_id = id,
+                mean_dist_t1 = mean(word_word_dists),
+                median_dist_t1 = median(word_word_dists),
+                var_dist_t1 =  ifelse(mean(var(word_word_dists)) == 0, NA,
+                                       mean(var(word_word_dists))),
+                n_t1 = nrow(word_word_dists),
+                median_freq_t1 =  median(words_in_model$log_freq_w1, na.rm = T)) 
+    
+}
+
+MIN_WORDS_PER_DOMAIN <- 3
+nested_data_by_kid <- types_clean %>% 
+  ungroup()  %>%
+  nest(-mcrae_domain, -target_child_id) %>%
+  mutate(n_words = map_dbl(data, ~nrow(.))) %>%
+  filter(n_words >= MIN_WORDS_PER_DOMAIN) %>%
+  filter(!is.na(mcrae_domain))
+
+vocab_measures <- map2_df(nested_data_by_kid$target_child_id, 
+                          nested_data_by_kid$data, 
+                          get_vocab_measure_by_kid3, 
+                          word2vec_model) %>%
+  mutate(mcrae_domain = nested_data_by_kid$mcrae_domain)
+```
+
+Merge in other variables
+```{r, v1}
+vocab_df <- vocab_measures %>%
+    filter(n_t1 > 2) %>%
+    mutate_at(vars(mean_dist_t1, median_dist_t1, n_t1), log) %>%
+    left_join(kid_info %>% select(target_child_id, 
+                                  log_mtld_t1, 
+                                  log_mtld_t2, 
+                                  age_t1, age_diff , 
+                                  log_transcript_length_t1, log_transcript_length_t2,  
+                                  log_num_trigrams_t1, log_num_trigrams_t2,
+                                  mlu_m_t1, mlu_m_t2, 
+                                  target_child_sex, 
+                                  mean_trans_prob_t1 , 
+                                  prop_na_trans_t1,
+                                  Num_Corred_Pairs_No_Tax, 
+                                  Density_No_Tax,
+                                  prop_noun_t1, 
+                                  prop_verb_t1,
+                                  corpus_id, collection_name))  %>%
+        mutate(mcrae_domain = as.factor(mcrae_domain))
+ # mutate(Density_No_Tax = ifelse(is.na(Density_No_Tax), 0, Density_No_Tax))
+        # Num_Corred_Pairs_No_Tax = ifelse(is.na(Num_Corred_Pairs_No_Tax), 0,
+ #                                         Num_Corred_Pairs_No_Tax))
+
+#write_csv(vocab_df, "semantic_space_by_kid_childes.csv")
+```
+
+```{r, include = F}
+vocab_df %>%
+  select(-target_child_id, -target_child_sex, -corpus_id, -collection_name) %>%
+  gather("var", "value") %>%
+  ggplot(aes( x = value)) +
+  geom_density() +
+  facet_wrap(~var, scales = "free")
+```
+
+
+```{r, fig.width=10, fig.height=10}
+df_no_corrs <- vocab_df %>%
+  select(-target_child_id, -target_child_sex, -corpus_id, -collection_name) 
+  #filter_all(all_vars(!is.na(.)))
+
+corr_mat <- cor(df_no_corrs, 
+                use = "pairwise.complete.obs")
+
+p.mat <- corrplot::cor.mtest(df_no_corrs, 
+                  conf.level = .95,  
+                  use = "pairwise.complete.obs")$p
+
+cols <- rev(colorRampPalette(c("red", "white", "blue"))(100))
+
+corrplot::corrplot(corr_mat, method = "color",  col = cols,
+         type = "full", order = "hclust", number.cex = .7,
+         addCoef.col = "black", insig = "blank",
+         p.mat = p.mat, sig.level = .05, 
+         tl.col = "black", tl.srt = 90,
+         diag = FALSE)
+```
+
+## Regressions
+### Predicting MTLD at t2
+
+```{r}
+lme4::lmer(scale(log_mtld_t2) ~ 
+                  scale(median_dist_t1)  + 
+                  #scale(var_dist_t1) +
+                  scale(Num_Corred_Pairs_No_Tax) * mcrae_domain +
+                  scale(age_t1) + 
+                  scale(age_diff) + 
+                  scale(log_mtld_t1) +
+                  scale(prop_noun_t1) +
+                  #target_child_sex +                  
+                 # scale(mlu_m_t1)+ 
+                  scale(median_freq_t1) +
+                  scale(log_transcript_length_t1) + 
+                  #scale(log_transcript_length_t2) + 
+             (1|corpus_id),
+   data = vocab_df %>% filter(mcrae_domain %in% c("1","3","4","5","6"))) %>%
+  summary()
+```
+

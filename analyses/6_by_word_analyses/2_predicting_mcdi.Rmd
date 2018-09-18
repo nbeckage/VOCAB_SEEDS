@@ -1,0 +1,82 @@
+---
+title: Predicting MCDI longitudinal data
+output:
+  html_document:
+    highlight: tango
+    theme: cerulean
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(broom)
+library(lme4)
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+Load mcdi and t value data
+```{r}
+t_values <- read_csv("data/word_coeffs_log_mtld_t2.csv") %>%
+  select(word, t) %>%
+  mutate(word = tolower(word))
+
+mcdi_path <- "../7_mcdi/data/train_sample_longitud_mcdi.csv"
+mcdi_path2 <- "../7_mcdi/data/test_sample_longitud_mcdi.csv"
+```
+
+Get t-score by kid
+```{r}
+cdi_data <- read_csv(mcdi_path) %>%
+  bind_rows(read_csv(mcdi_path2)) %>%
+  select(-study_id, -study, -birthday, -session_date, -total_num_sessions,
+         -num_langs, -hard_of_hearing, -mcdi_type, -languages, -extra_categories) %>%
+   arrange(child_id, session_num)
+
+# get produced words by kid
+produced_words <- cdi_data %>%
+  filter(value > 0)  %>%
+  select(-value) 
+
+# get mean t score by kid
+t_score_by_kid <- produced_words %>%
+  left_join(t_values, by = c("item"= "word"))  %>% # need to tidy this, some words missing!
+  group_by(child_id, session_num) %>%
+  summarize(mean_t = mean(t, na.rm = TRUE))
+```
+
+Get time point data
+```{r}
+# timepoint data
+demographic_data <- cdi_data %>%
+  select(-item, -value) %>%
+  distinct(child_id, session_num, .keep_all = T)  %>%
+  group_by(child_id) %>%
+  mutate(subsequent_age = lead(age), by = "session_num",
+         subsequent_percentile = lead(percentile), by = "session_num",
+         subsequent_words_spoken = lead(words_spoken), by = "session_num",
+         delta_age = subsequent_age - age,
+         delta_percentile = subsequent_percentile - percentile,
+         delta_words_spoken = subsequent_words_spoken - words_spoken) %>%
+  select( -by)
+ 
+# join together       
+full_df <- t_score_by_kid %>%
+  left_join(demographic_data)
+```
+
+Fit mixed effect model predicting change in words at t2 as a function of mean t-score at t1, controlling for change in age. Mean t-score at t1 predicts change in vocabulary size at t2.
+
+```{r}
+lmer(delta_words_spoken ~ mean_t + delta_age + (session_num|child_id), full_df) %>%
+  summary()
+```
+
