@@ -76,7 +76,7 @@ full_df <- t_score_by_kid %>%
 Fit mixed effect model predicting change in words at t2 as a function of mean t-score at t1, controlling for change in age. Mean t-score at t1 predicts change in vocabulary size at t2.
 
 ```{r}
-lmer(delta_words_spoken ~ mean_t + delta_age + (session_num|child_id), full_df) %>%
+lmer(delta_words_spoken ~ mean_t + delta_age +  words_spoken + (session_num|child_id), full_df) %>%
   summary()
 ```
 

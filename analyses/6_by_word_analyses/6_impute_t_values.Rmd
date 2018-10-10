@@ -1,0 +1,170 @@
+---
+title: Impute t - values for adult childes words
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(data.table)
+
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+
+Get Adult Words in Childes
+```{r}
+adult_target_words <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/3_train_childes_model/childes_adult_w2v.txt") %>%
+  mutate(word = str_replace_all(word,"[^[:graph:]]", " "),
+         word = tolower(word))  %>%
+  select(word)
+```
+
+
+```{r}
+freq <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/childes_adult_word_freq.csv") %>%
+  select(-n) %>%
+  mutate(word = tolower(word))
+
+density_norms <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/bills_density_norms.csv") %>% 
+  select(-density) %>%
+  mutate(word = tolower(word))
+
+embedding_dist <- read_csv("data/childes_embedding_dist_by_word_100v.csv") %>%
+  mutate(word = tolower(word))
+
+concreteness <- read_csv("/Users/mollylewis/Documents/research/Projects/2_published/ref_complex/corpus/brysbaert_database/brysbaert_corpus.csv") %>%
+  rename(word = Word,
+         conc = Conc.M) %>%
+  select(word, conc)  %>%
+  mutate(word = tolower(word))
+
+pos <- read_tsv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/data/SUBTLEX-US\ frequency\ list\ with\ PoS\ information\ text\ version.txt") %>%
+  select(Word, Dom_PoS_SUBTLEX) %>%
+  rename(word = Word,
+         pos = Dom_PoS_SUBTLEX) %>%
+  mutate(is_verb = ifelse(pos == "Verb", 1, 0),
+         word = tolower(word))  %>%
+  select(-pos)
+
+adult_word_predictors <- adult_target_words %>%
+  mutate(word = tolower(word)) %>%
+  left_join(density_norms) %>%
+  left_join(embedding_dist) %>%
+  left_join(concreteness) %>%
+  left_join(pos) %>%
+  left_join(freq) %>%
+  mutate(word_length = nchar(word)) %>%
+  mutate_at(vars(centrality, mean_dist, conc, log_freq, word_length), scale)  %>%
+  filter_all(all_vars(!is.na(.))) %>%
+  distinct()
+```
+
+Get beta weights
+```{r}
+BETAS <- "data/betas_for_imputation.csv"
+beta_df <- read_csv(BETAS)
+
+intercept <- filter(beta_df, term == "(Intercept)") %>%
+  pull(estimate)
+
+mean_dist_beta <- filter(beta_df, term == "mean_dist") %>%
+  pull(estimate)
+
+conc_beta <- filter(beta_df, term == "conc") %>%
+  pull(estimate)
+
+centrality_beta <- filter(beta_df, term == "centrality") %>%
+  pull(estimate)
+
+pos_beta <- filter(beta_df, term == "is_verb") %>%
+  pull(estimate)
+
+word_length_beta <- filter(beta_df, term == "word_length") %>%
+  pull(estimate)
+
+
+freq_beta <- filter(beta_df, term == "log_freq") %>%
+  pull(estimate)
+```
+
+
+Predict t-values
+```{r}
+predicted_ts <- adult_word_predictors %>%
+  group_by(word)%>%
+ transmute(predicted_t = intercept + 
+            (mean_dist_beta*mean_dist) +
+            (conc_beta * conc) +
+            (centrality_beta * centrality) +
+            (pos_beta * is_verb) +
+            (word_length_beta * word_length),
+            (freq_beta * log_freq)) %>%
+  select(word, predicted_t) %>%
+  arrange(-predicted_t)
+
+hist(predicted_ts$predicted_t)
+
+DT::datatable(predicted_ts)
+```
+
+
+```{r, eval = F}
+#word2vec_model_childes <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/3_train_childes_model/childes_adult_w2v.txt") 
+
+#crit_model <- word2vec_model_childes %>%
+#  filter(word %in% predicted_ts$word)
+
+MODEL_PATH <- "/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/0_exploration/wiki.en.vec"
+
+
+wiki_model <- fread(
+  MODEL_PATH,
+  header = FALSE,
+  skip = 1,
+  quote = "",
+  encoding = "UTF-8",
+  data.table = TRUE,
+  col.names = c("target_word",
+                unlist(lapply(2:301, function(x) paste0("V", x)))))
+
+crit_model <- wiki_model %>%
+  filter(target_word %in% predicted_ts$word)
+
+
+tsne_outF = Rtsne::Rtsne(crit_model[,-1])
+tsne_dimsF <- tsne_outF$Y %>%
+  as.data.frame() %>%
+  rename(tsne_X = V1,
+         tsne_Y = V2)  %>%
+  bind_cols(word = crit_model$target_word)
+
+tsne_dims <- tsne_dimsF %>%
+  left_join(predicted_ts)
+
+ # mutate(t_bin = ifelse(t > 1.2, 1, 0),
+      #   t_bin = as.factor(t_bin))
+
+ggplot(tsne_dims, aes(x = tsne_X, y = tsne_Y, color = predicted_t)) +
+  scale_color_continuous(low = "white", high = "red") +
+  geom_point()
+
+```
+
+```
+

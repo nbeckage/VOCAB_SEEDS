@@ -293,36 +293,41 @@ demographic_data &lt;-<span class="st"> </span>cdi_data <span class="op">%&gt;%<
 full_df &lt;-<span class="st"> </span>t_score_by_kid <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">left_join</span>(demographic_data)</code></pre></div>
 <p>Fit mixed effect model predicting change in words at t2 as a function of mean t-score at t1, controlling for change in age. Mean t-score at t1 predicts change in vocabulary size at t2.</p>
-<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lmer</span>(delta_words_spoken <span class="op">~</span><span class="st"> </span>mean_t <span class="op">+</span><span class="st"> </span>delta_age <span class="op">+</span><span class="st"> </span>(session_num<span class="op">|</span>child_id), full_df) <span class="op">%&gt;%</span>
+<div class="sourceCode"><pre class="sourceCode r"><code class="sourceCode r"><span class="kw">lmer</span>(delta_words_spoken <span class="op">~</span><span class="st"> </span>mean_t <span class="op">+</span><span class="st"> </span>delta_age <span class="op">+</span><span class="st">  </span>words_spoken <span class="op">+</span><span class="st"> </span>(session_num<span class="op">|</span>child_id), full_df) <span class="op">%&gt;%</span>
 <span class="st">  </span><span class="kw">summary</span>()</code></pre></div>
 <pre><code>## Linear mixed model fit by REML ['lmerMod']
 ## Formula: 
-## delta_words_spoken ~ mean_t + delta_age + (session_num | child_id)
+## delta_words_spoken ~ mean_t + delta_age + words_spoken + (session_num |  
+##     child_id)
 ##    Data: full_df
 ## 
-## REML criterion at convergence: 14694.7
+## REML criterion at convergence: 14693.2
 ## 
 ## Scaled residuals: 
 ##     Min      1Q  Median      3Q     Max 
-## -7.4819 -0.4550 -0.1015  0.3094  8.1722 
+## -7.4867 -0.4560 -0.1029  0.3097  8.1779 
 ## 
 ## Random effects:
 ##  Groups   Name        Variance Std.Dev. Corr 
-##  child_id (Intercept)  947.30  30.778        
-##           session_num   30.18   5.493   -1.00
-##  Residual             1752.61  41.864        
+##  child_id (Intercept) 1089.68  33.010        
+##           session_num   27.81   5.273   -0.99
+##  Residual             1716.04  41.425        
 ## Number of obs: 1412, groups:  child_id, 224
 ## 
 ## Fixed effects:
-##             Estimate Std. Error t value
-## (Intercept)  -15.814      6.138  -2.576
-## mean_t        53.348     10.188   5.236
-## delta_age     28.404      1.451  19.577
+##                Estimate Std. Error t value
+## (Intercept)  -17.180983   6.419417  -2.676
+## mean_t        70.271043  11.493447   6.114
+## delta_age     28.061913   1.452022  19.326
+## words_spoken  -0.027867   0.007283  -3.826
 ## 
 ## Correlation of Fixed Effects:
-##           (Intr) mean_t
-## mean_t    -0.945       
-## delta_age -0.257 -0.008</code></pre>
+##             (Intr) mean_t delt_g
+## mean_t      -0.895              
+## delta_age   -0.245 -0.019       
+## words_spokn  0.055 -0.385  0.032
+## fit warnings:
+## Some predictor variables are on very different scales: consider rescaling</code></pre>
 
 
 

@@ -18,6 +18,7 @@ analyses/2_trigrams/data/*
 resources/nih-r21-2016.pdf
 analyses/3_kid_vocabs/data/*
 analyses/7_mcdi/data/*
+analyses/3_kid_vocabs/3_train_childes_model/childes_kid_adult_w2v.txt
 *mcdi_results.csv
 
 # LaTeX #

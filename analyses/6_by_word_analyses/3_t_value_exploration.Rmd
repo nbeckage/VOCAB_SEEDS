@@ -1,0 +1,110 @@
+---
+title: T-value exploration
+output:
+  html_document:
+    highlight: tango
+    theme: cerulean
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(broom)
+library(lme4)
+library(data.table)
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+Get t-values
+```{r}
+t_values <- read_csv("data/word_coeffs_log_mtld_t2.csv") %>%
+  #filter(n_know >= 10) %>%
+  select(word, t) %>%
+  mutate(word = tolower(word)) 
+```
+
+Plot childes-trained model
+```{r}
+word2vec_model_childes <- read_csv("/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/3_kid_vocabs/3_train_childes_model/childes_adult_w2v.txt") 
+
+crit_model <- word2vec_model_childes %>%
+  filter(word %in% t_values$word)
+
+tsne_outF = Rtsne::Rtsne(crit_model[,-1])
+tsne_dimsF <- tsne_outF$Y %>%
+  as.data.frame() %>%
+  rename(tsne_X = V1,
+         tsne_Y = V2)  %>%
+  bind_cols(word = crit_model$word)
+
+tsne_dims <- tsne_dimsF %>%
+  left_join(t_values) %>%
+  mutate(t_bin = ifelse(t > 1.2, 1, 0),
+         t_bin = as.factor(t_bin))
+
+ggplot(tsne_dims, aes(x = tsne_X, y = tsne_Y, color = t_bin)) +
+  #scale_color_continuous(low = "white", high = "red") +
+  geom_point()
+
+tsne_dims %>%
+ filter(t_bin == 1) %>%
+  ggplot(aes(x = tsne_X, y = tsne_Y, color = t_bin)) +
+  geom_text(aes(label = word), size = 2)
+  
+```
+
+
+
+Plot wikipedia-trained model
+```{r}
+MODEL_PATH <- "/Users/mollylewis/Documents/research/Projects/1_in_progress/VOCAB_SEEDS/analyses/0_exploration/wiki.en.vec"
+
+
+wiki_model <- fread(
+  MODEL_PATH,
+  header = FALSE,
+  skip = 1,
+  quote = "",
+  encoding = "UTF-8",
+  data.table = TRUE,
+  col.names = c("target_word",
+                unlist(lapply(2:301, function(x) paste0("V", x)))))
+
+crit_model <- wiki_model %>%
+  filter(target_word %in% t_values$word)
+
+tsne_outF = Rtsne::Rtsne(crit_model[,-1])
+tsne_dimsF <- tsne_outF$Y %>%
+  as.data.frame() %>%
+  rename(tsne_X = V1,
+         tsne_Y = V2)  %>%
+  bind_cols(word = crit_model$target_word)
+
+tsne_dims <- tsne_dimsF %>%
+  left_join(t_values) %>%
+  mutate(t_bin = ifelse(t > 1.2, 1, 0),
+            t_bin = as.factor(t_bin))
+
+ggplot(tsne_dims, aes(x = tsne_X, y = tsne_Y, color = t_bin)) +
+  #scale_color_continuous(low = "white", high = "red") +
+  geom_point()
+
+tsne_dims %>%
+  filter(t_bin == 1) %>%
+  ggplot(
+         aes(x = tsne_X, y = tsne_Y, color = t_bin)) +
+  geom_text(aes(label = word), size = 2)
+
+  
+
+
+```

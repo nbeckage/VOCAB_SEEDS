@@ -1,4 +1,4 @@
-# get by word coefficients
+# get by word coefficients 
 
 library(tidyverse)
 library(modelr)
@@ -7,13 +7,13 @@ library(broom)
 # params
 WORD_CUTOFF <- 5 # number of times kid has to say word to count
 MODEL_FORMULA <- "log_mtld_t2 ~ know_word_at_t1 + log_mtld_t1 +
-                age_t1 + age_diff + log(n_transcripts_t1) + log(n_transcripts_t2)"
-OUTFILE <- "word_coeffs_log_mtld_tw.csv"
+age_t1 + age_diff + log(n_transcripts_t1) + log(n_transcripts_t2)"
+OUTFILE <- "word_coeffs_log_mtld_900_1200.csv"
 
 # input data
-word_counts <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv")
-mtld <- read_csv("../3_kid_vocabs/semantic_density_df.csv")
-n_transcripts <- read_csv("n_transcripts_per_kid.csv") %>% # change to transcript length
+word_counts <- read_csv("../../1_mtld_measure/data/target_types_for_MTLD_kids_900_1200.csv")
+mtld <- read_csv("../../1_mtld_measure/data/groups_info_900_1200.csv") 
+n_transcripts <- read_csv("../data/n_transcripts_per_kid_900_1200.csv") %>% # change to transcript length
   spread("tbin", "n_transcripts") %>%
   rename(n_transcripts_t1 = t1,
          n_transcripts_t2 = t2)
@@ -22,7 +22,7 @@ n_transcripts <- read_csv("n_transcripts_per_kid.csv") %>% # change to transcrip
 # by kid x word df
 d_filter <- word_counts %>%
   group_by(target_child_id, tbin, gloss) %>% # make to lower
-  summarize(count = sum(count)) %>%
+  summarize(count = sum(count)) %>% 
   filter(count >= WORD_CUTOFF,
          tbin == "t1") %>%
   ungroup()
@@ -30,8 +30,10 @@ d_filter <- word_counts %>%
 
 # by kid df
 mtld_data <- mtld %>%
+  mutate(log_mtld_t1 = log(mtld_t1),
+         log_mtld_t2 = log(mtld_t2)) %>%
   select(log_mtld_t1, log_mtld_t2, target_child_id, age_t1, age_diff) %>%
-  mutate(mtld_diff = log_mtld_t2-log_mtld_t1) %>%
+  mutate(mtld_diff = log_mtld_t2 - log_mtld_t1) %>%
   left_join(n_transcripts) 
 
 # coefficient function
@@ -59,6 +61,7 @@ get_word_beta <- function(word, mod_formula, df, vocab_df){
            t = t.value) %>%
     select(word, Estimate, SE, t, n_know)
 }
+
 
 #### DO THE THING ####
 word_coeffs <- map_df(unique(d_filter$gloss), 

@@ -1,0 +1,57 @@
+---
+title: Explore window size on childes model
+output:
+  html_document:
+    highlight: tango
+    theme: cerulean
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(broom)
+library(lme4)
+library(data.table)
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+```{r}
+
+childes_5 <- read_csv("data/childes_embedding_dist_by_word.csv") %>%
+  rename(mean_dist_5 = mean_dist)
+childes_20 <- read_csv("data/childes_embedding_dist_by_word_20_window.csv") %>%
+  rename(mean_dist_20 = mean_dist)
+
+all_dists <- full_join(childes_5, childes_20, by = "word")
+
+cor.test(all_dists$mean_dist_5, all_dists$mean_dist_20)
+ggplot(all_dists, aes(x = mean_dist_5, y = mean_dist_20 )) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+
+all_distsf <- all_dists %>%
+  filter(mean_dist_5 < .2,
+         mean_dist_20 <.2)
+
+cor.test(all_distsf$mean_dist_5, all_distsf$mean_dist_20)
+
+ggplot(all_distsf, aes(x = mean_dist_5, y = mean_dist_20 )) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+  
+
+cor.test(all_dists$mean_dist.x, all_dists$mean_dist.y)
+
+
+```

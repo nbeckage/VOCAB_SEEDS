@@ -5,10 +5,10 @@ library(tidyverse)
 
 ######### PARAMETERS ############
 
-FILEOUT <- "n_transcripts_per_kid.csv"
-INFILE_NA <- "../1_mtld_measure/diversity_measures_by_age_NA.csv"
-INFILE_UK <- "../1_mtld_measure/data/diversity_measures_by_age_UK.csv"
-GROUPS_OUTFILE <- "../1_mtld_measure/data/groups_info_600_900_corrected.csv"
+FILEOUT <- "n_transcripts_per_kid_900_1200.csv"
+INFILE_NA <- "../../1_mtld_measure/data/diversity_measures_by_age_NA.csv"
+INFILE_UK <- "../../1_mtld_measure/data/diversity_measures_by_age_UK.csv"
+GROUPS_OUTFILE <- "../1_mtld_measure/data/groups_info_900_1200.csv"
 NDAYS_PER_YEAR <- 365.2422
 
 #(ages defined below)
@@ -49,7 +49,7 @@ longitudinal_transcripts <- all_ld_df %>%
 RANGE <- 150 # of timpoints (days)
 
 # Bin transcripts into timpoints
-OPTIMAL_CUTOFF <- 750
+OPTIMAL_CUTOFF <- 1050
 min_age <- OPTIMAL_CUTOFF - RANGE
 max_age <- OPTIMAL_CUTOFF + RANGE
 

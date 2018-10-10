@@ -1,0 +1,102 @@
+---
+title: Cross-validation analysis
+output:
+  html_document:
+    highlight: tango
+    toc: true
+    number_sections: false
+    theme: cerulean
+    toc_float: true
+    code_folding: hide
+---
+
+```{r setup, message=FALSE, warning = F}
+library(knitr)
+
+opts_chunk$set(echo = T, message = F, warning = F, 
+               error = F, cache = F, tidy = F)
+
+library(tidyverse)
+library(feather)
+library(langcog)
+library(modelr)
+library(broom)
+library(corrplot)
+
+
+theme_set(theme_classic(base_size = 10))
+
+```
+
+```{r}
+trained_ts <- read_csv("word_coeffs_log_mtld_t2_sampled.csv")
+train_ids <- read_csv("train_ids_sampled.csv")
+```
+
+
+```{r}
+word_counts <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") %>%
+  filter(tbin == "t1") %>%
+  select(target_child_id, gloss, count)  %>%
+  filter(count > 5)
+
+t1_word_counts_with_ts <- word_counts  %>%
+  left_join(trained_ts %>% select(word, t), 
+            by = c("gloss" = "word")) %>%
+  select(-gloss, -count) %>%
+  group_by(target_child_id) %>%
+  summarize_all(sum)
+```
+
+
+## Proportion vocab of good words
+
+### predicting mtld t2
+
+```{r}
+TCUTTOFF <- 1
+
+mtld <- read_csv("../3_kid_vocabs/semantic_density_df.csv") 
+word_counts <- read_csv("../1_mtld_measure/data/target_types_for_MTLD_kids_600_900.csv") %>%
+  filter(tbin == "t1") %>%
+  select(target_child_id, gloss, count)  %>%
+  filter(!(target_child_id %in% train_ids$train_ids)) 
+ # filter(count > 5)
+
+words_with_ts <- word_counts %>%
+  left_join(trained_ts %>% select(t, word), 
+            by = c("gloss" = "word")) %>%
+  mutate(large_t = ifelse(t >= TCUTTOFF, 1, 0))
+
+kid_by_large_ts <- words_with_ts %>%
+  group_by(target_child_id) %>%
+  summarize(prop_large_t = mean(large_t, na.rm = T)) %>%
+  left_join(mtld)
+
+kid_by_large_ts %>%
+ggplot(aes(x = prop_large_t, y = log_mtld_t2)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_classic()
+```
+
+```{r}
+lm(log_mtld_t2 ~ log_mtld_t1  + age_diff  + prop_large_t, data = kid_by_large_ts) %>%
+  summary()
+
+lm(log_mtld_t2 ~ log_mtld_t1 + age_diff   + mean_log_word_freq_t1 + prop_large_t, data = kid_by_large_ts) %>%
+  summary()
+```
+
+Cross validation x 50
+```{r}
+cross_valdidation_sampled <- read_csv("sampled_prop_t_coefficients.csv") %>%
+  filter(term == "prop_large_t")
+
+cross_valdidation_sampled %>%
+  summarize(mean_t = mean(statistic), 
+            mean_p = mean(p.value))
+
+
+```
+

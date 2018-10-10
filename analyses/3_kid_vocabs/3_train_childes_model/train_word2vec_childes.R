@@ -8,7 +8,7 @@ use_python("/usr/local/bin/python") # reticulate stuff - necessary for gensim
 gensim <- import("gensim")
 
 ## outfiles
-OUTFILEA <- "childes_adult_w2v.txt"
+OUTFILEA <- "childes_adult_w2v_100v.txt"
 OUTFILEK <- "childes_kid_w2v.txt"
 OUTFILE_ALL <- "childes_kid_adult_w2v.txt"
 
@@ -42,17 +42,17 @@ corpus_all <- list(c(corpus_adult[[1]], corpus_kid[[1]]))
 
 # params
 MIN_COUNT <- 5L
-VECTORS <- 200L
-CORPUS <- corpus_all
+VECTORS <- 100L
+CORPUS <- corpus_adult
 #THREADS <- 4L
 #ITER <- 50L #1L 
-#WINDOW <-  20L 
+WINDOW <-  20L 
 #NEGATIVE <- 5L
 
 
 the_model <- gensim$models$Word2Vec(
   min_count = MIN_COUNT,
-  #window =  WINDOW,
+  window =  WINDOW,
   #iter = ITER,
   #workers = THREADS,
   size = VECTORS,
@@ -71,4 +71,4 @@ tidy_model <- the_model$wv$syn0 %>%
           mutate(word = the_model$wv$index2word) %>%
           select(word, everything())
 
-write_csv(tidy_model, OUTFILE_ALL)
+write_csv(tidy_model, OUTFILEA)

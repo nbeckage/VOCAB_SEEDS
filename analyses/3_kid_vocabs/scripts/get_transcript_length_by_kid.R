@@ -1,7 +1,7 @@
 
 library(tidyverse)
 
-OUTFILE <- "../data/transcript_length_by_kid.csv"
+OUTFILE <- "../data/transcript_length_by_kid_900_1000.csv"
 
 # this comes from 5b_get_kid_childes_trigrams.R
 transcript_length <- read_csv("../../2_trigrams/data/trigrams/kid_childes_trigrams_turns_BY_KID.csv") %>%
